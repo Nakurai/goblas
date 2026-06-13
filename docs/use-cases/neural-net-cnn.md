@@ -6,6 +6,8 @@ matrix multiply — it slides a little filter over an image. Yet the standard wa
 `Dgemm`. That reshape is called **im2col**, and it is the reason a fast BLAS makes CNNs fast.
 Read [neural-net-mlp.md](neural-net-mlp.md) first.
 
+**Real-world examples**: Facial recognition, self-driving cars interpreting camera feeds, or medical image analysis (like finding tumors in x-rays).
+
 ## What a convolution does
 
 Instead of connecting every input to every neuron (as an MLP does), a convolution uses a small
@@ -66,7 +68,7 @@ func init() { blasadapt.Use() }
 
 **Step 1 — im2col.** This part is plain Go data movement (no math, no BLAS): for each output
 position, gather the underlying patch into a column. For a single-channel `H×W` image, a `kH×kW`
-filter, and stride 1:
+filter, and stride 1 (you can use the synthetic `images_tiny.csv` dataset in the `data/` folder):
 
 ```go
 outH, outW := H-kH+1, W-kW+1

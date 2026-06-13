@@ -6,6 +6,8 @@ A support vector machine (SVM) is a powerful classifier, and **kernel** SVMs are
 not (the solver). Read [knn.md](knn.md) first; the kernel matrix is built much like the distance
 matrix there.
 
+**Real-world examples**: Complex bioinformatics classification (like categorizing protein folding patterns) or advanced text categorization.
+
 ## The intuition: the widest street
 
 A linear SVM separates two classes with a boundary, but not just any boundary — the one with the
@@ -72,7 +74,7 @@ import (
 func init() { blasadapt.Use() }
 ```
 
-Training points, one per row, and their squared norms:
+Training points, one per row, and their squared norms. You can use the synthetic `classification.csv` dataset in the `data/` folder:
 
 ```go
 X := mat.NewDense(n, d, trainData)
@@ -109,7 +111,7 @@ directly as the kernel.
 ## The honest part: the solver is not BLAS work
 
 Building `K` was dense linear algebra and goblas-fast. But *training* the SVM from `K` means
-solving a constrained **quadratic optimization** problem to find which points are support
+solving a constrained **quadratic optimization** problem (this means finding the lowest point of a curve shaped like a bowl, subject to certain boundaries) to find which points are support
 vectors and with what weights. The classic algorithm, **SMO** (Sequential Minimal
 Optimization), works by repeatedly picking a pair of points and adjusting them — it is iterative
 and largely scalar, **not** a matrix multiply. goblas does not accelerate that inner solver.

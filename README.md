@@ -4,6 +4,8 @@ A pure-Go BLAS (Basic Linear Algebra Subprograms) library for float64, with hand
 
 **No CGo. No external dependencies at runtime.** The library is fully portable — it compiles and runs correctly on any platform — and selects accelerated assembly automatically on supported processors at startup.
 
+**AI Disclaimer**: Since it looks like this is a polarizing topic, let's make it clear that this entire repo has been generated. Use with caution, at your own risks.
+
 ## Status
 
 | Level | Routine | Pure-Go | NEON (ARM64) |
@@ -16,7 +18,7 @@ A pure-Go BLAS (Basic Linear Algebra Subprograms) library for float64, with hand
 | **L2** | `Dger`, `Dtrsv` | ✅ | (fallback to pure-Go) |
 | **L3** | `Dgemm` | ✅ | ✅ ~390 GFLOPS (tiled, multithreaded, tuned) |
 | **L3** | `Dsyrk`, `Dtrsm` | ✅ | ✅ recursive blocking — bulk runs on the NEON `Dgemm` |
-| **L3** | `Dsymm`, `Dtrmm` | ✅ | (reference loops) |
+| **L3** | `Dsymm`, `Dtrmm` | ✅ | ✅ recursive blocking — bulk runs on the NEON `Dgemm` |
 
 All routines are correct and tested on every platform. The pure-Go fallback is always available; the NEON kernel is selected at runtime when running on Apple Silicon.
 

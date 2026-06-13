@@ -7,6 +7,8 @@ matrix–vector product, and the *entire training step* is the linear regression
 learned. Read [neural-net-lstm.md](neural-net-lstm.md) and
 [linear-regression.md](linear-regression.md) first — this tutorial ties them together.
 
+**Real-world examples**: Real-time signal processing in telecommunications, or forecasting chaotic systems like weather patterns.
+
 ## The surprising idea
 
 Training a recurrent network (like an LSTM) is slow and delicate because you must adjust all the
@@ -56,6 +58,7 @@ import (
 func init() { blasadapt.Use() }
 
 // Win: N×d (fixed random)   W: N×N (fixed random, spectral-radius scaled)
+// (You can use the `time_series.csv` dataset in `data/` for the `inputAt` step)
 x := mat.NewVecDense(N, nil) // reservoir state, starts at zero
 states := mat.NewDense(T, N, nil) // we will collect one state row per time step
 
@@ -83,7 +86,7 @@ Now we want output weights `W_out` so that, at each step, `W_out · x(t)` predic
 `y(t)`. Stack the collected states as the matrix `States` (`T × N`) and the targets as `Y`
 (`T × outDim`). Finding `W_out` to minimize squared error is **exactly the least-squares problem
 from [linear regression](linear-regression.md)** — with a small regularization term `λ` added
-for stability (this is **ridge regression**):
+for stability (this is **ridge regression**, which means adding a term to prevent weights from exploding by penalizing excessively large values, ensuring a stable model):
 
 ```
 W_out = (Statesᵀ·States + λI)⁻¹ · Statesᵀ·Y

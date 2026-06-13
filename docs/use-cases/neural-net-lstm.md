@@ -6,6 +6,8 @@ The **LSTM** (Long Short-Term Memory) is the classic, robust recurrent cell. Its
 intimidating, but computationally each time step is — once again — a single matrix multiply.
 Read [neural-net-mlp.md](neural-net-mlp.md) first.
 
+**Real-world examples**: Language translation, speech recognition, or stock market trend prediction.
+
 ## The idea: a network with memory
 
 A plain feed-forward network treats every input independently. A recurrent network keeps a
@@ -35,8 +37,8 @@ that decide, at each step, what to do with the memory:
 - **output gate** `o` — how much of the memory to expose as the hidden state.
 
 Each gate looks at the same two things — the current input `xₜ` and the previous hidden state
-`hₜ₋₁` — and produces a number between 0 and 1 (via a sigmoid) per memory slot. There is also a
-**candidate** `g` (via tanh) proposing new memory content.
+`hₜ₋₁` — and produces a number between 0 and 1 (via a **sigmoid** function, which squashes any value into a probability between 0 and 1) per memory slot. There is also a
+**candidate** `g` (via **tanh**, which squashes any value to a range between -1 and 1) proposing new memory content.
 
 ## The key realization: four gates, one matrix multiply
 
@@ -83,7 +85,7 @@ sigmoid := func(_, _ int, v float64) float64 { return 1 / (1 + math.Exp(-v)) }
 tanh := func(_, _ int, v float64) float64 { return math.Tanh(v) }
 ```
 
-Process a batch of `n` sequences with input size `d` and hidden size `H`. Stack input and
+Process a batch of `n` sequences with input size `d` and hidden size `H` (you can try this with the `time_series.csv` dataset in the `data/` folder). Stack input and
 previous hidden state side by side into a `n × (d+H)` matrix, and let `W` be `(d+H) × 4H` (the
 four gates stacked along the columns):
 

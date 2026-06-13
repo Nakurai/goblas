@@ -5,6 +5,8 @@ email spam, yes or no?", "will this customer churn?" It is the simplest real cla
 introduces **gradient descent**, the iterative training loop that every neural network in these
 tutorials also uses. Read [linear-regression.md](linear-regression.md) first.
 
+**Real-world examples**: Classifying emails as spam or not spam, or predicting whether a patient has a specific disease based on their medical history.
+
 ## From a number to a probability
 
 We still compute a linear score `z = X·β` exactly as before. But a raw score can be any number
@@ -38,7 +40,7 @@ weights. The idea of **gradient descent**:
 3. Nudge each weight a little in the direction that reduces the error.
 4. Repeat until it stops improving.
 
-The "direction that reduces error" is the **gradient**. For logistic regression the math works
+The "direction that reduces error" is the **gradient** (you can think of this like a multi-dimensional slope or a compass pointing downhill toward the lowest possible error). For logistic regression the math works
 out beautifully simple — the gradient of the standard loss is:
 
 ```
@@ -71,7 +73,7 @@ import (
 func init() { blasadapt.Use() }
 ```
 
-Data: `X` is `n × (p+1)` (features plus a 1s column for the offset, just like before), `y` is
+Data: `X` is `n × (p+1)` (features plus a 1s column for the offset, just like before). You can use the synthetic `classification.csv` dataset in the `data/` folder to follow along. `y` is
 the `n` labels (each 0 or 1), and `beta` starts at zeros:
 
 ```go

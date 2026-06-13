@@ -4,6 +4,8 @@ This is the place to start. We will fit a straight line (then a plane, then any 
 dimensions) to data, and along the way you will learn the `gonum/mat` basics that the other
 tutorials reuse. No prior knowledge assumed.
 
+**Real-world examples**: Predicting house prices based on square footage and age in real estate, or forecasting future sales based on advertising spend.
+
 ## The problem, in pictures
 
 You have a pile of points and you suspect a roughly linear relationship: as `x` goes up, `y`
@@ -53,8 +55,8 @@ system for `β`. Two facts make this fast and BLAS-friendly:
 
 - `XᵀX` is a matrix multiplied by its own transpose — exactly the **`Dsyrk`** routine
   (symmetric rank-k update). `Xᵀy` is a matrix–vector product, **`Dgemv`**.
-- `XᵀX` is symmetric and (for sensible data) positive-definite, so the system solves with a
-  **Cholesky** factorization — itself built from `Dsyrk`/`Dtrsm`/`Dgemm` under the hood.
+- `XᵀX` is symmetric and (for sensible data) **positive-definite** (a math term meaning the dataset is "well-behaved" with enough variety so there is a single, clear "best" solution, without infinite possibilities or flat spots). Because of this, the system solves with a
+  **Cholesky factorization** — a fast shortcut for solving linear equations by breaking a matrix down into two simpler triangular matrices. This is built from `Dsyrk`/`Dtrsm`/`Dgemm` under the hood.
 
 So the entire cost of linear regression is goblas-accelerated BLAS. Good first example.
 
@@ -72,7 +74,7 @@ func init() { blasadapt.Use() }
 ```
 
 Now the data. `mat.NewDense(rows, cols, data)` makes a dense matrix; the data slice is laid out
-row by row. Say we have `n` points and `p` features, and we have already added the 1s column so
+row by row. You can use the synthetic `housing.csv` dataset in the `data/` folder to follow along. Say we have `n` points and `p` features, and we have already added the 1s column so
 `X` is `n × (p+1)`:
 
 ```go
@@ -135,7 +137,7 @@ row-major world to its own column-major kernels for free.)
 
 Forming `XᵀX` squares the spread of your data, which can amplify numerical error when columns
 are nearly redundant (e.g. two features that are almost the same). The professional fix is to
-skip `XᵀX` and factor `X` directly with **QR**:
+skip `XᵀX` and factor `X` directly with a **QR factorization** (**Q** stands for an Orthogonal matrix and **R** stands for a Right/upper triangular matrix). This method avoids the precision loss of squaring large numbers:
 
 ```go
 var qr mat.QR

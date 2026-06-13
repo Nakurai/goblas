@@ -33,6 +33,7 @@ from. Start at the **[use-cases index](use-cases/README.md)**, or jump in:
 - [neural-net-mlp.md](use-cases/neural-net-mlp.md) — every layer is a `Dgemm`
 - [neural-net-cnn.md](use-cases/neural-net-cnn.md) — convolution via im2col → `Dgemm`
 - [neural-net-lstm.md](use-cases/neural-net-lstm.md) — the gates are one `Dgemm` per step
+- [yolo-object-detection.md](use-cases/yolo-object-detection.md) — a real model: conv backbone is `Dgemm`, NMS is not BLAS
 - [reservoir-computing.md](use-cases/reservoir-computing.md) — `Dgemv` per step + ridge-regression readout
 
 (Decision trees are intentionally omitted — they are branchy, not matrix work, so goblas would

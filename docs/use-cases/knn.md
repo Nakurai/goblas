@@ -4,6 +4,8 @@ KNN is the most intuitive classifier there is, and it hides a lovely trick: comp
 distances you need turns out to be a single matrix multiply. That is what makes it a great fit
 for goblas.
 
+**Real-world examples**: Recommendation systems (e.g., finding users with similar tastes) or simple handwriting recognition.
+
 ## The idea
 
 To classify a new point, look at the `k` training points closest to it and take a vote. "Tell
@@ -25,13 +27,13 @@ naively, a double loop. The trick is to do them all at once with linear algebra.
 
 ## The distance-matrix trick
 
-The squared Euclidean distance between two vectors `x` and `t` expands like this:
+The squared Euclidean distance (just the straight-line distance, like measuring with a ruler) between two vectors `x` and `t` expands like this:
 
 ```
 ‖x − t‖²  =  ‖x‖²  +  ‖t‖²  −  2 · (x · t)
 ```
 
-The first two terms are just the squared lengths of each point (cheap — one pass over the data).
+The first two terms are just the squared norms (the length of each point vector from the origin), which are cheap to compute — one pass over the data.
 The interesting term is `x · t`, the dot product between a query and a training point. Stack all
 queries into a matrix `Q` (`m × d`, one point per row) and all training points into `T` (`n ×
 d`). Then **every** query-training dot product at once is the matrix multiply:
@@ -57,7 +59,7 @@ import (
 func init() { blasadapt.Use() }
 ```
 
-Queries and training data, one point per row:
+Queries and training data, one point per row. You can use the synthetic `classification.csv` dataset in the `data/` folder to follow along:
 
 ```go
 Q := mat.NewDense(m, d, queryData)    // m points to classify

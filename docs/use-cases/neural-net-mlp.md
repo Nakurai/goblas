@@ -6,6 +6,8 @@ between them. Every layer is a `Dgemm`. If you understood
 [logistic-regression.md](logistic-regression.md), you already understand one neuron — a network
 is just many of them, in layers.
 
+**Real-world examples**: Fraud detection in finance, or complex pattern recognition where rules are not easily defined by humans.
+
 > **Caveat up front.** goblas is float64 and CPU-only with no automatic differentiation. This
 > tutorial teaches you the mechanics by building them yourself, in double precision, on the CPU.
 > That is ideal for *understanding*; it is not a competitive training stack for large models
@@ -63,6 +65,7 @@ ReLU between:
 
 ```go
 // Shapes: X is n×d, W1 is d×h, W2 is h×k (k outputs).
+// You can use the non-linear classification dataset `moons.csv` in the `data/` folder for this!
 W1 := mat.NewDense(d, h, w1Data)
 W2 := mat.NewDense(h, k, w2Data)
 
@@ -81,7 +84,7 @@ column to `X` and a bias row to `W`, exactly the offset trick from
 [linear regression](linear-regression.md).)
 
 That is a complete forward pass — predictions for a whole batch, with the two expensive steps on
-goblas. For classification you would pass `Y` through a softmax; for regression you would use `Y`
+goblas. For classification you would pass `Y` through a **softmax** (a function that turns a list of raw scores into a list of probabilities that sum to 100%); for regression you would use `Y`
 directly.
 
 ## The backward pass (training)
