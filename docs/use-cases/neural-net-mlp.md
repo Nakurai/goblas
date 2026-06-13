@@ -2,16 +2,19 @@
 
 This is where matrix multiply stops being a trick and becomes the *whole point*. A neural
 network is, computationally, a stack of matrix multiplies with simple nonlinear functions
-between them. Every layer is a `Dgemm`. If you understood
+between them. Every layer is a `Sgemm`. If you understood
 [logistic-regression.md](logistic-regression.md), you already understand one neuron — a network
 is just many of them, in layers.
 
 **Real-world examples**: Fraud detection in finance, or complex pattern recognition where rules are not easily defined by humans.
 
-> **Caveat up front.** goblas is float64 and CPU-only with no automatic differentiation. This
-> tutorial teaches you the mechanics by building them yourself, in double precision, on the CPU.
-> That is ideal for *understanding*; it is not a competitive training stack for large models
-> (those use float32 on GPUs). The math, though, is exactly the same.
+> **Precision note.** This tutorial uses **float32** via goblas's
+> [`mat32`](goblas-mat32-fundamentals.md) package — the single precision real training stacks
+> use, where every matrix multiply moves half the bytes of float64 and runs faster (goblas's
+> `Sgemm` hits ~560 GFLOPS vs ~360 for `Dgemm` on the M5 Pro). What stays educational is the
+> rest: goblas is CPU-only with no automatic differentiation, so you compute gradients by hand.
+> The math is exactly what a GPU framework does. (Prefer double precision? The identical code
+> works with `gonum/mat` + `blasadapt.Use()`.)
 
 ## From one neuron to a layer
 
@@ -28,7 +31,7 @@ input has `d` features, stack the neurons' weight vectors as the columns of a we
 pre-activations are one matrix multiply:
 
 ```
-Z = X · W + b        →  Dgemm, an (n × h) matrix
+Z = X · W + b        →  Sgemm, an (n × h) matrix
 A = activation(Z)    →  elementwise
 ```
 
@@ -37,7 +40,7 @@ network just repeats this: the activations `A` of one layer are the inputs `X` o
 
 ```
 input → [W₁] → activation → [W₂] → activation → … → output
-        Dgemm               Dgemm
+        Sgemm               Sgemm
 ```
 
 ## The forward pass
@@ -49,34 +52,34 @@ zeros out negatives.
 Setup:
 
 ```go
-import (
-    "math"
-    "github.com/nakurai/goblas/blasadapt"
-    "gonum.org/v1/gonum/mat"
-)
+import "github.com/nakurai/goblas/mat32"
 
-func init() { blasadapt.Use() }
-
-relu := func(_, _ int, v float64) float64 { return math.Max(0, v) }
+// ReLU keeps positives, zeros negatives. float32 in, float32 out.
+relu := func(_, _ int, v float32) float32 {
+    if v > 0 {
+        return v
+    }
+    return 0
+}
 ```
 
-Weights (initialized small and random in practice), and the forward pass — two `Dgemm`s with a
+Weights (initialized small and random in practice), and the forward pass — two `Sgemm`s with a
 ReLU between:
 
 ```go
 // Shapes: X is n×d, W1 is d×h, W2 is h×k (k outputs).
 // You can use the non-linear classification dataset `moons.csv` in the `data/` folder for this!
-W1 := mat.NewDense(d, h, w1Data)
-W2 := mat.NewDense(h, k, w2Data)
+W1 := mat32.NewDense32(d, h, w1Data)
+W2 := mat32.NewDense32(h, k, w2Data)
 
 // Hidden layer: H = ReLU(X · W1)
-var Z1, H mat.Dense
-Z1.Mul(X, W1)        // Dgemm on goblas  → n×h
+var Z1, H mat32.Dense32
+Z1.Mul(X, W1)        // Sgemm on goblas  → n×h
 H.Apply(relu, &Z1)   // elementwise ReLU
 
 // Output layer: Y = H · W2
-var Y mat.Dense
-Y.Mul(&H, W2)        // Dgemm on goblas  → n×k
+var Y mat32.Dense32
+Y.Mul(&H, W2)        // Sgemm on goblas  → n×k
 ```
 
 (We have omitted the bias terms for brevity; in practice you add a bias row, or append a 1s
@@ -96,29 +99,29 @@ regression — now applied layer by layer, working *backwards* from the output. 
 Conceptually, if `dY` is how wrong the output is (prediction − target), then:
 
 ```
-gradient of W2  =  Hᵀ · dY              → Dgemm
-error reaching H =  dY · W2ᵀ            → Dgemm
-gradient of W1  =  Xᵀ · (dH ⊙ ReLU′)    → Dgemm  (⊙ = elementwise)
+gradient of W2  =  Hᵀ · dY              → Sgemm
+error reaching H =  dY · W2ᵀ            → Sgemm
+gradient of W1  =  Xᵀ · (dH ⊙ ReLU′)    → Sgemm  (⊙ = elementwise)
 ```
 
-Each gradient is a `Dgemm`; each "push the error to the previous layer" is a `Dgemm`. In code,
+Each gradient is a `Sgemm`; each "push the error to the previous layer" is a `Sgemm`. In code,
 one training step looks like:
 
 ```go
 // Forward (as above) gives Z1, H, Y. Suppose dY = Y − target (n×k).
-var dY mat.Dense
+var dY mat32.Dense32
 dY.Sub(&Y, target)
 
 // Gradient for W2:  Hᵀ · dY            (h×k)
-var gW2 mat.Dense
-gW2.Mul(H.T(), &dY)                      // Dgemm
+var gW2 mat32.Dense32
+gW2.Mul(H.T(), &dY)                      // Sgemm
 
 // Error backpropagated to the hidden layer: dY · W2ᵀ   (n×h)
-var dH mat.Dense
-dH.Mul(&dY, W2.T())                       // Dgemm
+var dH mat32.Dense32
+dH.Mul(&dY, W2.T())                       // Sgemm
 
 // Apply ReLU's derivative: zero out where Z1 was negative.
-dH.Apply(func(i, j int, v float64) float64 {
+dH.Apply(func(i, j int, v float32) float32 {
     if Z1.At(i, j) > 0 {
         return v
     }
@@ -126,41 +129,45 @@ dH.Apply(func(i, j int, v float64) float64 {
 }, &dH)
 
 // Gradient for W1:  Xᵀ · dH            (d×h)
-var gW1 mat.Dense
-gW1.Mul(X.T(), &dH)                       // Dgemm
+var gW1 mat32.Dense32
+gW1.Mul(X.T(), &dH)                       // Sgemm
 
-// Gradient-descent step on both weight matrices.
-lr := 0.01
-W2.Sub(W2, scale(lr, &gW2))               // W2 ← W2 − lr·gW2
-W1.Sub(W1, scale(lr, &gW1))               // W1 ← W1 − lr·gW1
+// Gradient-descent step on both weight matrices (gradient scaled by the rate).
+const lr float32 = 0.01
+var s2, s1 mat32.Dense32
+s2.Scale(lr, &gW2)
+W2.Sub(W2, &s2)                           // W2 ← W2 − lr·gW2
+s1.Scale(lr, &gW1)
+W1.Sub(W1, &s1)                           // W1 ← W1 − lr·gW1
 ```
 
 Wrap that in a loop over many batches and epochs and you are training a neural network. Every
-`Mul` is a goblas `Dgemm`; the activations and their derivatives are cheap elementwise passes.
+`Mul` is a goblas `Sgemm`; the activations and their derivatives are cheap elementwise passes.
 
 ## Why neural nets are the ideal BLAS workload
 
-Look at the tables: forward pass = 2 `Dgemm`s, backward pass = 4 `Dgemm`s, for a 2-layer net.
-Scale to deeper nets and bigger batches and it is `Dgemm` almost all the way down — which is
-precisely the routine goblas tuned hardest (the 8×6 NEON kernel, ~360 GFLOPS). The
+Look at the tables: forward pass = 2 `Sgemm`s, backward pass = 4 `Sgemm`s, for a 2-layer net.
+Scale to deeper nets and bigger batches and it is `Sgemm` almost all the way down — which is
+precisely the routine goblas tuned hardest (the float32 8×8 NEON kernel, ~560 GFLOPS). The
 nonlinearities are elementwise and negligible. This is why GPU vendors and BLAS authors obsess
-over matrix multiply: **make `Dgemm` fast and you make deep learning fast.**
+over matrix multiply: **make `Sgemm` fast and you make deep learning fast.**
 
 ## Where goblas earned its keep
 
 | Step | BLAS routine | goblas role |
 |------|--------------|-------------|
-| Each layer forward `X·W` | `Dgemm` | accelerated |
-| Weight gradients `Hᵀ·dY`, `Xᵀ·dH` | `Dgemm` | accelerated |
-| Backprop error `dY·Wᵀ` | `Dgemm` | accelerated |
+| Each layer forward `X·W` | `Sgemm` | accelerated |
+| Weight gradients `Hᵀ·dY`, `Xᵀ·dH` | `Sgemm` | accelerated |
+| Backprop error `dY·Wᵀ` | `Sgemm` | accelerated |
 | Activations & their derivatives | elementwise | plain Go (cheap) |
 
 ## Recap
 
-- A neural network layer is `A = activation(X·W)` — a `Dgemm` plus an elementwise function.
-- Forward and backward passes are *all* `Dgemm`s; training is gradient descent layer by layer.
+- A neural network layer is `A = activation(X·W)` — a `Sgemm` plus an elementwise function.
+- Forward and backward passes are *all* `Sgemm`s; training is gradient descent layer by layer.
 - This is the workload BLAS exists to accelerate; goblas runs every matrix multiply.
-- Caveat: float64/CPU/no-autodiff — built for understanding, not large-scale training.
+- Precision: float32 via `mat32` (what real training uses); still CPU/no-autodiff, built for
+  understanding rather than large-scale training.
 
 Next: [neural-net-cnn.md](neural-net-cnn.md) shows how even *convolution* — which looks nothing
-like a matrix multiply — is turned into one big `Dgemm`.
+like a matrix multiply — is turned into one big `Sgemm`.

@@ -9,6 +9,13 @@ learned. Read [neural-net-lstm.md](neural-net-lstm.md) and
 
 **Real-world examples**: Real-time signal processing in telecommunications, or forecasting chaotic systems like weather patterns.
 
+> **Precision note.** Signal data is often float32, and every operation here has a float32 twin:
+> the per-step `Dgemv`, the `Dsyrk`/`Dgemm` of the readout, and the Cholesky solve all exist in
+> [`mat32`](goblas-mat32-fundamentals.md) (`mat32.Cholesky32` is the float32 ridge solve). This
+> tutorial stays in `gonum/mat` float64 only because it uses convenience methods (`SetRow`,
+> `AddVec`, `RawVector`) that `mat32` keeps lean and does not expose; the linear-algebra lesson
+> is identical in float32.
+
 ## The surprising idea
 
 Training a recurrent network (like an LSTM) is slow and delicate because you must adjust all the

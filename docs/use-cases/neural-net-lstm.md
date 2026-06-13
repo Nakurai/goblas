@@ -8,6 +8,12 @@ Read [neural-net-mlp.md](neural-net-mlp.md) first.
 
 **Real-world examples**: Language translation, speech recognition, or stock market trend prediction.
 
+> **Precision note.** Real LSTMs run in **float32**, and the per-step gate `Dgemm` has a float32
+> twin (`Sgemm` via [`mat32`](goblas-mat32-fundamentals.md)). This tutorial stays in `gonum/mat`
+> float64 only because it leans on convenience methods (`Slice`, `Copy` of sub-blocks) that
+> `mat32` keeps lean and does not expose; the matrix-multiply lesson is identical in either
+> precision.
+
 ## The idea: a network with memory
 
 A plain feed-forward network treats every input independently. A recurrent network keeps a

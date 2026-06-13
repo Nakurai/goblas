@@ -9,11 +9,12 @@ not).** Read [neural-net-cnn.md](neural-net-cnn.md) first.
 
 **Real-world examples**: Real-time pedestrian tracking for self-driving cars, or quality control identifying defective parts on a fast-moving assembly line.
 
-> **Honesty up front.** YOLO is a large convolutional network. Running one in float64 on the
-> CPU through gonum is an *educational* exercise — you will understand exactly how detection
-> works and see where the compute goes, but it will be far slower than a real deployment
-> (float32, GPU, or an optimized engine like ONNX Runtime / NCNN). Treat this as "how YOLO
-> works and which parts goblas speeds up," not "deploy YOLO on goblas."
+> **Honesty up front.** YOLO is a large convolutional network. This tutorial uses **float32**
+> via goblas's [`mat32`](goblas-mat32-fundamentals.md) — the precision real detectors use — so
+> the convolutions run on the `Sgemm` kernel with no float64 casting. It is still an
+> *educational* exercise: goblas is CPU-only, so it will be far slower than a real deployment
+> (GPU, or an optimized engine like ONNX Runtime / NCNN). Treat this as "how YOLO works and which
+> parts goblas speeds up," not "deploy YOLO on goblas."
 
 ## The problem: from classification to detection
 
@@ -60,7 +61,7 @@ The three network parts:
 Here is the lesson this tutorial exists to teach. Walk through what YOLO actually computes:
 
 **The backbone, neck, and head are convolutions.** And from the [CNN tutorial](neural-net-cnn.md)
-you already know the punchline: a convolution becomes, via **im2col**, a single `Dgemm`. The
+you already know the punchline: a convolution becomes, via **im2col**, a single `Sgemm`. The
 overwhelming majority of YOLO's compute — easily 90%+ — is these convolutions, i.e. matrix
 multiplies. **goblas accelerates all of it**, exactly as in the CNN tutorial; there is nothing
 new in the *mechanism*, just many more layers of it.
@@ -68,7 +69,7 @@ new in the *mechanism*, just many more layers of it.
 ```go
 // Each conv layer in the backbone is the same pattern as the CNN tutorial:
 //   patches = im2col(featureMap)      // plain Go gather
-//   out.Mul(filters, patches)         // ← Dgemm on goblas, repeated for every layer
+//   out.Mul(filters, patches)         // ← Sgemm on goblas, repeated for every layer
 ```
 
 **But the detection postprocessing is not BLAS work.** After the network produces its grid of
@@ -88,32 +89,27 @@ This is the whole point of including YOLO. A real model is a **pipeline**: a big
 (the convolutional network — goblas's home turf) bookended by non-BLAS glue (NMS, decoding).
 Knowing which is which tells you exactly what a fast BLAS does and does not buy you.
 
-## Sketching it with gonum/mat
+## Sketching it with mat32
 
 You would not realistically hand-build YOLO, but the *shape* is worth seeing. The backbone is a
-loop over conv layers, each an im2col + `Dgemm` (from the CNN tutorial), with pooling/activation
+loop over conv layers, each an im2col + `Sgemm` (from the CNN tutorial), with pooling/activation
 between:
 
 ```go
-import (
-    "github.com/nakurai/goblas/blasadapt"
-    "gonum.org/v1/gonum/mat"
-)
-
-func init() { blasadapt.Use() }
+import "github.com/nakurai/goblas/mat32"
 
 // Backbone: feature maps flow through many conv layers. Each layer:
 // (You could use the `images_tiny.csv` dataset in `data/` to represent a tiny image input)
-func convLayer(input *mat.Dense, filters *mat.Dense, kH, kW int) *mat.Dense {
+func convLayer(input *mat32.Dense32, filters *mat32.Dense32, kH, kW int) *mat32.Dense32 {
     patches := im2col(input, kH, kW) // plain Go (see the CNN tutorial)
-    var out mat.Dense
-    out.Mul(filters, patches)         // ← Dgemm on goblas
+    var out mat32.Dense32
+    out.Mul(filters, patches)         // ← Sgemm on goblas (float32)
     relu(&out)                        // elementwise
     return &out
 }
 ```
 
-The head produces, per grid cell, raw box/confidence/class numbers (more `Dgemm`s). Then the
+The head produces, per grid cell, raw box/confidence/class numbers (more `Sgemm`s). Then the
 non-BLAS tail:
 
 ```go
@@ -129,9 +125,9 @@ that is correct and expected.
 
 | Stage | Operation | goblas role |
 |-------|-----------|-------------|
-| Backbone conv layers | im2col + `Dgemm` (per layer) | accelerated — the bulk of the cost |
-| Neck (multi-scale fusion) | convolutions = `Dgemm` | accelerated |
-| Detection head | convolutions = `Dgemm` | accelerated |
+| Backbone conv layers | im2col + `Sgemm` (per layer) | accelerated — the bulk of the cost |
+| Neck (multi-scale fusion) | convolutions = `Sgemm` | accelerated |
+| Detection head | convolutions = `Sgemm` | accelerated |
 | im2col, pooling, activations | gather / elementwise | plain Go (cheap) |
 | Decode predictions | elementwise | plain Go (cheap) |
 | **Non-Maximum Suppression** | sort + overlap comparisons | **not BLAS — not accelerated** |
@@ -140,11 +136,12 @@ that is correct and expected.
 
 - YOLO detects all objects in one forward pass of a convolutional network (backbone → neck →
   head), then postprocesses the grid of predictions into final boxes.
-- The network is convolutions, and convolutions are `Dgemm` (via im2col) — so goblas accelerates
+- The network is convolutions, and convolutions are `Sgemm` (via im2col) — so goblas accelerates
   ~90%+ of YOLO's compute, with no new mechanism beyond the [CNN tutorial](neural-net-cnn.md).
 - The postprocessing — decoding and especially **Non-Maximum Suppression** — is branchy,
   sorting-style work that goblas (and matrix hardware in general) does not speed up.
-- Caveat: float64/CPU makes this educational, not a deployable detector. The value is seeing,
+- Precision: float32 via `mat32` (what real detectors use); CPU-only makes this educational, not
+  a deployable detector. The value is seeing,
   concretely, that a real model is a BLAS-bound core wrapped in non-BLAS glue.
 
 Back to the [use-cases index](README.md).
