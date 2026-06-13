@@ -6,10 +6,10 @@ import (
 	"unsafe"
 )
 
-// sliceFrom reconstructs a []float64 of length n from a panel pointer. The
+// sliceFrom reconstructs a []T of length n from a panel pointer. The
 // micro-kernel API passes raw pointers so the assembly and Go kernels share a
 // signature; the Go kernel needs slices back for bounds-checked access.
-func sliceFrom(p *float64, n int) []float64 { return unsafe.Slice(p, n) }
+func sliceFrom[T float](p *T, n int) []T { return unsafe.Slice(p, n) }
 
 // Micro-kernel tile shape. All micro-kernels use mr=8 rows; the tile width nr
 // varies per kernel (4 for the pure-Go and NEON 8x4 kernels, 6 for the NEON
@@ -17,7 +17,7 @@ func sliceFrom(p *float64, n int) []float64 { return unsafe.Slice(p, n) }
 const (
 	dgemmMR    = 8
 	dgemmNR    = 4
-	dgemmNRMax = 8 // scratch sizing bound for edge tiles
+	dgemmNRMax = 12 // scratch sizing bound for edge tiles (widest kernel: float32 8x12)
 )
 
 // Cache-blocking parameters. Defaults are tuned for the Apple M5 Pro (Phase 6
@@ -39,15 +39,17 @@ var dgemmMaxWorkers = 0
 
 // microKernel computes C[mr x nr] += Apanel * Bpanel for packed micro-panels:
 // a holds k slices of mr contiguous values, b holds k slices of nr contiguous
-// values, and c is column-major with leading dimension ldc (in elements).
-type microKernel func(k int, a, b, c *float64, ldc int)
+// values, and c is column-major with leading dimension ldc (in elements). It is
+// generic over the element type so float32 and float64 share the driver while
+// each supplies its own (assembly or Go) kernel.
+type microKernel[T float] func(k int, a, b, c *T, ldc int)
 
-// dgemmBlocked is the blocked/tiled/parallel dgemm driver shared by every
-// kernel implementation; only the micro-kernel differs (NEON assembly on
-// ARM64, pure Go elsewhere). Packing normalizes all four transpose
-// combinations, scaling by beta happens once up front, and alpha is folded
-// into the packed copy of A.
-func dgemmBlocked(mk microKernel, nr int, transA, transB bool, m, n, k int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int) {
+// gemmBlocked is the blocked/tiled/parallel gemm driver shared by every
+// kernel implementation and both element types; only the micro-kernel differs
+// (NEON/AVX2 assembly on accelerated hosts, pure Go elsewhere). Packing
+// normalizes all four transpose combinations, scaling by beta happens once up
+// front, and alpha is folded into the packed copy of A.
+func gemmBlocked[T float](mk microKernel[T], nr int, transA, transB bool, m, n, k int, alpha T, a []T, lda int, b []T, ldb int, beta T, c []T, ldc int) {
 	if m == 0 || n == 0 {
 		return
 	}
@@ -75,7 +77,7 @@ func dgemmBlocked(mk microKernel, nr int, transA, transB bool, m, n, k int, alph
 	// own A block. Buffers are padded up to whole micro-panels so the kernel
 	// never reads partial slices.
 	kcMax := min(k, dgemmKC)
-	packedB := make([]float64, roundUp(n, nr)*kcMax)
+	packedB := make([]T, roundUp(n, nr)*kcMax)
 
 	// Parallelize across row blocks when there is enough work to amortize the
 	// goroutine overhead. Each ic block touches a disjoint row range of C, so
@@ -96,7 +98,7 @@ func dgemmBlocked(mk microKernel, nr int, transA, transB bool, m, n, k int, alph
 		packBPanels(kc, n, nr, b, ldb, transB, pc, packedB)
 
 		if workers == 1 {
-			dgemmRowBlocks(mk, nr, m, n, kc, alpha, a, lda, transA, pc, packedB, c, ldc, 0, 1)
+			gemmRowBlocks(mk, nr, m, n, kc, alpha, a, lda, transA, pc, packedB, c, ldc, 0, 1)
 			continue
 		}
 		var wg sync.WaitGroup
@@ -104,19 +106,19 @@ func dgemmBlocked(mk microKernel, nr int, transA, transB bool, m, n, k int, alph
 			wg.Add(1)
 			go func(w int) {
 				defer wg.Done()
-				dgemmRowBlocks(mk, nr, m, n, kc, alpha, a, lda, transA, pc, packedB, c, ldc, w, workers)
+				gemmRowBlocks(mk, nr, m, n, kc, alpha, a, lda, transA, pc, packedB, c, ldc, w, workers)
 			}(w)
 		}
 		wg.Wait()
 	}
 }
 
-// dgemmRowBlocks processes every workers-th mc-sized row block, starting at
+// gemmRowBlocks processes every workers-th mc-sized row block, starting at
 // block index w. It owns its packed-A buffer and scratch tile, so concurrent
 // calls with distinct w never share mutable state (C row ranges are disjoint).
-func dgemmRowBlocks(mk microKernel, nr, m, n, kc int, alpha float64, a []float64, lda int, transA bool, pc int, packedB []float64, c []float64, ldc int, w, workers int) {
-	packedA := make([]float64, roundUp(min(m, dgemmMC), dgemmMR)*kc)
-	var scratchBuf [dgemmMR * dgemmNRMax]float64
+func gemmRowBlocks[T float](mk microKernel[T], nr, m, n, kc int, alpha T, a []T, lda int, transA bool, pc int, packedB []T, c []T, ldc int, w, workers int) {
+	packedA := make([]T, roundUp(min(m, dgemmMC), dgemmMR)*kc)
+	var scratchBuf [dgemmMR * dgemmNRMax]T
 	scratch := scratchBuf[:dgemmMR*nr]
 
 	for blk := w; blk*dgemmMC < m; blk += workers {
@@ -157,16 +159,16 @@ func dgemmRowBlocks(mk microKernel, nr, m, n, kc int, alpha float64, a []float64
 	}
 }
 
-// dgemmKernel8x4Go is the pure-Go micro-kernel: the portable counterpart of
+// gemmKernel8x4Go is the pure-Go micro-kernel: the portable counterpart of
 // the assembly kernels, operating on the same packed-panel format. The 8x4
 // accumulator tile lives in a fixed-size array the compiler can register-
 // allocate aggressively; the k-loop body is 32 multiply-adds.
-func dgemmKernel8x4Go(k int, a, b, c *float64, ldc int) {
+func gemmKernel8x4Go[T float](k int, a, b, c *T, ldc int) {
 	// Reconstruct slices from the panel pointers (length set by k).
 	ap := sliceFrom(a, k*dgemmMR)
 	bp := sliceFrom(b, k*dgemmNR)
 
-	var acc [dgemmMR * dgemmNR]float64
+	var acc [dgemmMR * dgemmNR]T
 	for l := 0; l < k; l++ {
 		as := ap[l*dgemmMR : l*dgemmMR+dgemmMR]
 		bs := bp[l*dgemmNR : l*dgemmNR+dgemmNR]
@@ -193,7 +195,7 @@ func dgemmKernel8x4Go(k int, a, b, c *float64, ldc int) {
 // packAPanels packs alpha*op(A)(ic:ic+mc, pc:pc+kc) into mr-wide micro-panels:
 // panel p holds rows [p*mr, p*mr+mr) as kc consecutive slices of mr contiguous
 // values. Rows beyond mc are zero-padded so the kernel can always read mr.
-func packAPanels(mc, kc int, alpha float64, a []float64, lda int, transA bool, ic, pc int, buf []float64) {
+func packAPanels[T float](mc, kc int, alpha T, a []T, lda int, transA bool, ic, pc int, buf []T) {
 	for ir := 0; ir < mc; ir += dgemmMR {
 		panel := buf[(ir/dgemmMR)*kc*dgemmMR:]
 		rows := min(dgemmMR, mc-ir)
@@ -221,7 +223,7 @@ func packAPanels(mc, kc int, alpha float64, a []float64, lda int, transA bool, i
 // packBPanels packs op(B)(pc:pc+kc, 0:n) into nr-wide micro-panels: panel p
 // holds columns [p*nr, p*nr+nr) as kc consecutive slices of nr contiguous
 // values. Columns beyond n are zero-padded.
-func packBPanels(kc, n, nr int, b []float64, ldb int, transB bool, pc int, buf []float64) {
+func packBPanels[T float](kc, n, nr int, b []T, ldb int, transB bool, pc int, buf []T) {
 	for jr := 0; jr < n; jr += nr {
 		panel := buf[(jr/nr)*kc*nr:]
 		cols := min(nr, n-jr)

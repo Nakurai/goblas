@@ -10,3 +10,10 @@ func Select(c cpu.CPU) Kernel {
 	_ = c
 	return genericKernel{}
 }
+
+// Select32 always returns the portable float32 reference on hosts without
+// assembly kernels.
+func Select32(c cpu.CPU) Kernel32 {
+	_ = c
+	return genericKernel{}
+}

@@ -51,7 +51,7 @@ func TestDgemmGenericBlockedMatchesNaive(t *testing.T) {
 					cw[i], cb[i] = v, v
 				}
 
-				dgemmNaive(transA, transB, d.m, d.n, d.k, 1.2, a, lda, b, ldb, -0.5, cw, ldc)
+				gemmNaive(transA, transB, d.m, d.n, d.k, 1.2, a, lda, b, ldb, -0.5, cw, ldc)
 				g.Dgemm(transA, transB, d.m, d.n, d.k, 1.2, a, lda, b, ldb, -0.5, cb, ldc)
 
 				for i := range cw {

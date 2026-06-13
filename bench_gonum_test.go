@@ -93,3 +93,31 @@ func BenchmarkGonumVsGoblasDgemm(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkGonumVsGoblasSgemm compares pure-Go Gonum against goblas for
+// single-precision matrix-matrix multiply across a range of sizes.
+func BenchmarkGonumVsGoblasSgemm(b *testing.B) {
+	for _, n := range []int{64, 256, 512, 1024} {
+		a := benchMatrix32(1, n*n)
+		bb := benchMatrix32(2, n*n)
+		c := make([]float32, n*n)
+		flops := 2 * float64(n) * float64(n) * float64(n)
+
+		b.Run(fmt.Sprintf("gonum/%d", n), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				gonum.Sgemm(blas.NoTrans, blas.NoTrans, n, n, n, 1, a, n, bb, n, 0, c, n)
+				sink32 += c[n*n-1]
+			}
+			b.ReportMetric(flops/secPerOp(b)/1e9, "GFLOPS")
+		})
+		b.Run(fmt.Sprintf("goblas/%d", n), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				Sgemm(NoTrans, NoTrans, n, n, n, 1, a, n, bb, n, 0, c, n)
+				sink32 += c[n*n-1]
+			}
+			b.ReportMetric(flops/secPerOp(b)/1e9, "GFLOPS")
+		})
+	}
+}

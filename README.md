@@ -1,6 +1,6 @@
 # goblas
 
-A pure-Go BLAS (Basic Linear Algebra Subprograms) library for float64, with hand-tuned ARM64 NEON assembly kernels on Apple Silicon.
+A pure-Go BLAS (Basic Linear Algebra Subprograms) library for float64 **and float32**, with hand-tuned ARM64 NEON assembly kernels on Apple Silicon.
 
 **No CGo. No external dependencies at runtime.** The library is fully portable — it compiles and runs correctly on any platform — and selects accelerated assembly automatically on supported processors at startup.
 
@@ -22,6 +22,20 @@ A pure-Go BLAS (Basic Linear Algebra Subprograms) library for float64, with hand
 | **L3** | `Dsymm`, `Dtrmm` | ✅ | ✅ recursive blocking — bulk runs on the NEON `Dgemm` |
 
 All routines are correct and tested on every platform. The pure-Go fallback is always available; the NEON kernel is selected at runtime when running on Apple Silicon.
+
+### Single precision (float32)
+
+Every routine above has a single-precision `S`-prefixed twin (`Sdot`, `Saxpy`, `Sscal`, `Snrm2`, `Sasum`, `Isamax`, `Scopy`, `Sswap`, `Sgemv`, `Sger`, `Strsv`, `Sgemm`, `Ssyrk`, `Strsm`, `Ssymm`, `Strmm`). The float32 and float64 paths are the *same* blocked driver and triangular/symmetric recursion instantiated at the two element types via Go generics — only the leaf micro-kernels differ. A 128-bit NEON register holds 4 float32 (`.S4`) vs 2 float64 (`.D2`), so single precision runs faster:
+
+| Level | Routine | NEON (ARM64) |
+|-------|---------|--------------|
+| **L1** | `Sdot`, `Sasum`, `Snrm2` | ✅ ~17.5 Gelem/s (bandwidth-bound; ~13× / ~49× / ~28× vs pure-Go) |
+| **L1** | `Saxpy`, `Sscal` | ✅ `.S4` kernels |
+| **L1** | `Isamax`, `Scopy`, `Sswap` | (fallback to pure-Go; `Isamax` can't be vectorized — see below) |
+| **L2** | `Sgemv` | ✅ `.S4` column-axpy |
+| **L2** | `Sger`, `Strsv` | ✅ reuse NEON `saxpy`/`sdot` |
+| **L3** | `Sgemm` | ✅ **~562 GFLOPS** (8×8 micro-kernel; ~1.57× the float64 `Dgemm`) |
+| **L3** | `Ssyrk`, `Strsm`, `Ssymm`, `Strmm` | ✅ recursive blocking onto the NEON `Sgemm` |
 
 ## Benchmarks (M5 Pro, unit-stride float64)
 
@@ -57,6 +71,16 @@ Accelerate uses Apple's undocumented AMX matrix coprocessor, so it is the absolu
 
 OpenBLAS is the de-facto open-source optimized BLAS, with hand-tuned NEON kernels for ARM64 — the investigation's stated target was "70–85% of OpenBLAS". goblas reaches 96% at n=1024 and is *faster* at small sizes (goroutines beat OpenBLAS's thread pool on small problems, exactly as the investigation predicted). Run it yourself: `brew install openblas`, then `go test -tags openblasbench -run '^$' -bench Openblas .`
 
+### Single precision (float32 `Sgemm`, M5 Pro)
+
+| n | Gonum blas32 | goblas | Accelerate (AMX) | goblas vs Gonum |
+|---|--------------|--------|------------------|-----------------|
+| 256 | ~58 GFLOPS | **174 GFLOPS** | 1555 | **3.0×** |
+| 512 | ~83 GFLOPS | **339 GFLOPS** | 1552 | **4.1×** |
+| 1024 | ~79 GFLOPS | **566 GFLOPS** | 1762 | **7.1×** |
+
+goblas `Sgemm` is ~7× Gonum's pure-Go single-precision GEMM and ~1.57× goblas's own `Dgemm`. Against Accelerate it reaches a smaller fraction than in float64 (~33% at n=1024): Apple's AMX coprocessor is dramatically faster in single precision than NEON can match — an honest hardware-ceiling note, not a regression.
+
 **L1 & L2:** Beat the 4–6x investigation target on `Ddot` and `Dgemv`. Both are memory-bandwidth-bound, so further improvement is limited by hardware.
 
 **L3 (`Dgemm`):** The tiled NEON implementation packs A and B into cache-resident micro-panels, runs a register micro-kernel in assembly, and parallelizes row blocks across cores with goroutines. Phase 6 tuning (kc=512, mc=24 — sized so a packed A block sits inside the 128 KB P-core L1d) brought n=1024 from 236 to ~390 GFLOPS: **4.8x faster than Gonum**, hitting the investigation's 4–6x target even against Gonum's tiled, multithreaded `dgemm`. Phase 12 replaced the 8×4 micro-kernel with an **8×6** one (24 accumulator registers; each A load feeds 6 columns instead of 4), a further ~6% in interleaved A/B runs at n=1024.
@@ -90,6 +114,21 @@ column-major kernels via transpose identities (swap operands and dimensions,
 flip flags) — no data movement, no extra FLOPs. Routines goblas doesn't
 accelerate fall back to Gonum's own BLAS automatically.
 
+**Float32 BLAS:** `blasadapt.Use32()` registers goblas as the implementation for
+Gonum's `blas32` package, so `blas32.Gemm`/`Gemv`/`Trsm`/`Syrk`/… on
+`blas32.General` run on goblas single-precision kernels. It is independent of
+`Use()` — call both and float32 and float64 work each dispatch to their own
+kernels in the same program.
+
+**Float32 matrices — the `mat32` package.** Gonum has no float32 LAPACK and
+`gonum/mat` is float64-only, so goblas ships its own native float32 matrix type
+in [`mat32`](mat32). It provides `Dense32` with `Mul`/`MulVec`/`Add`/`Scale`/…
+and the **`Cholesky32` and `LU32` solves end-to-end in float32 — no float64
+casting** (the trailing FLOPs run on the goblas `Sgemm`/`Strsm`/`Ssyrk` kernels),
+so float32 inputs stay float32. The advanced factorizations (`QR32`, `SVD32`,
+`EigenSym32`, `Eigen32`) are provided via a float64 bridge to gonum and *do*
+cast internally. See [mat32 below](#float32-matrices-mat32).
+
 Measured on `gonum/mat` operations at n=1024 (M5 Pro, stock Gonum vs goblas registered):
 
 | Operation | Stock Gonum | With goblas | Speedup |
@@ -97,6 +136,44 @@ Measured on `gonum/mat` operations at n=1024 (M5 Pro, stock Gonum vs goblas regi
 | `Dense.Mul` | 27.2 ms | **5.9 ms** | **4.6x** |
 | `Cholesky.Factorize` | 34.5 ms | **17.5 ms** | **2.0x** |
 | `Dense.Solve` (LU) | 38.2 ms | **26.4 ms** | **1.4x** |
+
+## Float32 matrices (`mat32`)
+
+Because gonum offers no high-level float32 linear algebra, the
+[`mat32`](mat32) package provides a native one built on the goblas `S`-kernels —
+so float32 data (sensor streams, ML activations) gets matrices and solves
+**without casting to float64**:
+
+```go
+import "github.com/nakurai/goblas/mat32"
+
+// Ridge regression weights end-to-end in float32: w = (XᵀX + λI)⁻¹ Xᵀy.
+var xtx mat32.Dense32
+xtx.Mul(X.T(), X)                  // goblas Sgemm
+// ... add λ to the diagonal ...
+a := mat32.SymDense32FromDense(&xtx, true)
+var xty mat32.VecDense32
+xty.MulVec(X.T(), y)               // goblas Sgemv
+
+var chol mat32.Cholesky32
+chol.Factorize(a)                  // native float32 Cholesky (Ssyrk/Strsm/Sgemm)
+var w mat32.Dense32
+chol.SolveTo(&w, &xty)             // native float32 triangular solves
+```
+
+**Precision boundary:** `Dense32` arithmetic and the **`Cholesky32` / `LU32`
+solves are end-to-end float32** — no float64 round-trips, the trailing FLOPs run
+on goblas `Sgemm`/`Strsm`/`Ssyrk`/`Sgemv`. The advanced factorizations
+(`QR32`, `SVD32`, `EigenSym32`, `Eigen32`) use a float64 bridge to gonum and
+*do* cast internally (gonum has no float32 LAPACK). float32 carries ~7 digits,
+so `Det` overflows for moderate sizes — prefer the solves.
+
+Measured (M5 Pro) vs stock gonum/mat float64:
+
+| Operation | gonum float64 | goblas `mat32` float32 | Speedup |
+|-----------|---------------|------------------------|---------|
+| `Mul` (n=1024) | 27.1 ms | **3.3 ms** | **8.2×** |
+| `Cholesky` solve (n=512) | 7.1 ms | **2.5 ms** | **2.9×** |
 
 ## Getting started
 

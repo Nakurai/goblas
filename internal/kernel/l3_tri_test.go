@@ -90,9 +90,9 @@ func TestDtrsmSolvesSystem(t *testing.T) {
 							da := denseTri(a, lda, ta, upper, unit)
 							got := make([]float64, ldb*d.n)
 							if left {
-								dgemmNaive(trans, false, d.m, d.n, d.m, 1, da, ta, b, ldb, 0, got, ldb)
+								gemmNaive(trans, false, d.m, d.n, d.m, 1, da, ta, b, ldb, 0, got, ldb)
 							} else {
-								dgemmNaive(false, trans, d.m, d.n, d.n, 1, b, ldb, da, ta, 0, got, ldb)
+								gemmNaive(false, trans, d.m, d.n, d.n, 1, b, ldb, da, ta, 0, got, ldb)
 							}
 							for j := 0; j < d.n; j++ {
 								for i := 0; i < d.m; i++ {
@@ -136,7 +136,7 @@ func TestDsyrkMatchesDense(t *testing.T) {
 					// Dense reference: full C' = alpha*op(A)*op(A)^T + beta*C.
 					want := make([]float64, len(c))
 					copy(want, c)
-					dgemmNaive(trans, !trans, d.n, d.n, d.k, alpha, a, lda, a, lda, beta, want, ldc)
+					gemmNaive(trans, !trans, d.n, d.n, d.k, alpha, a, lda, a, lda, beta, want, ldc)
 
 					k.Dsyrk(upper, trans, d.n, d.k, alpha, a, lda, beta, c, ldc)
 
@@ -199,9 +199,9 @@ func TestDsymmMatchesDense(t *testing.T) {
 						want[i] = c[i]
 					}
 					if left {
-						dgemmNaive(false, false, d.m, d.n, d.m, alpha, da, ta, b, ldb, beta, want, ldc)
+						gemmNaive(false, false, d.m, d.n, d.m, alpha, da, ta, b, ldb, beta, want, ldc)
 					} else {
-						dgemmNaive(false, false, d.m, d.n, d.n, alpha, b, ldb, da, ta, beta, want, ldc)
+						gemmNaive(false, false, d.m, d.n, d.n, alpha, b, ldb, da, ta, beta, want, ldc)
 					}
 
 					g.Dsymm(left, upper, d.m, d.n, alpha, a, lda, b, ldb, beta, c, ldc)
@@ -244,9 +244,9 @@ func TestDtrmmMatchesDense(t *testing.T) {
 							}
 							want := make([]float64, len(b))
 							if left {
-								dgemmNaive(trans, false, d.m, d.n, d.m, alpha, da, ta, b, ldb, 0, want, ldb)
+								gemmNaive(trans, false, d.m, d.n, d.m, alpha, da, ta, b, ldb, 0, want, ldb)
 							} else {
-								dgemmNaive(false, trans, d.m, d.n, d.n, alpha, b, ldb, da, ta, 0, want, ldb)
+								gemmNaive(false, trans, d.m, d.n, d.n, alpha, b, ldb, da, ta, 0, want, ldb)
 							}
 
 							g.Dtrmm(left, upper, trans, unit, d.m, d.n, alpha, a, lda, b, ldb)
@@ -324,7 +324,7 @@ func TestDgerDtrsv(t *testing.T) {
 						k.Dtrsv(upper, trans, unit, nn, ta, lda, xv, 1)
 						// Verify op(A)*x == b.
 						got := make([]float64, nn)
-						dgemmNaive(trans, false, nn, 1, nn, 1, da, nn, xv, nn, 0, got, nn)
+						gemmNaive(trans, false, nn, 1, nn, 1, da, nn, xv, nn, 0, got, nn)
 						for i := range b {
 							if math.Abs(got[i]-b[i]) > 1e-8*(1+math.Abs(b[i])) {
 								t.Fatalf("%s trsv n=%d U=%v T=%v unit=%v i=%d: residual %v want %v",

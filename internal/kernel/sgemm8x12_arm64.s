@@ -1,0 +1,193 @@
+#include "textflag.h"
+
+// func sgemmKernel8x12(k int, a, b, c *float32, ldc int)
+//
+// Wider single-precision micro-kernel: C[8x12] += A_panel * B_panel. Compared
+// with the 8x8 kernel this reuses each A load across 12 columns instead of 8
+// (24 VFMLA per 8-float A load = 192 FLOPs/iter, 3 FMLA per A element, matching
+// the float64 8x6 kernel's density) at the cost of using all 24 spare registers
+// as accumulators.
+//
+// A NEON .S4 register holds 4 float32, so 8 rows = 2 registers per column.
+// Register plan:
+//   V0..V23  24 accumulators: column j lives in V(2j) (rows 0-3) and
+//            V(2j+1) (rows 4-7)
+//   V24,V25  current 8-row slice of A
+//   V26..V31 the 6 B broadcasts in flight (columns 0-5, then reused for 6-11)
+//   writeback: V24 = [1,1,1,1]; V26,V27 stage each C column (VFMLA fold, since
+//   VADD.S4 is integer)
+TEXT ·sgemmKernel8x12(SB), NOSPLIT, $0-40
+	MOVD k+0(FP), R0
+	MOVD a+8(FP), R1
+	MOVD b+16(FP), R2
+	MOVD c+24(FP), R3
+	MOVD ldc+32(FP), R4
+	LSL  $2, R4, R4           // ldc in bytes (float32 = 4)
+
+	VEOR V0.B16, V0.B16, V0.B16
+	VEOR V1.B16, V1.B16, V1.B16
+	VEOR V2.B16, V2.B16, V2.B16
+	VEOR V3.B16, V3.B16, V3.B16
+	VEOR V4.B16, V4.B16, V4.B16
+	VEOR V5.B16, V5.B16, V5.B16
+	VEOR V6.B16, V6.B16, V6.B16
+	VEOR V7.B16, V7.B16, V7.B16
+	VEOR V8.B16, V8.B16, V8.B16
+	VEOR V9.B16, V9.B16, V9.B16
+	VEOR V10.B16, V10.B16, V10.B16
+	VEOR V11.B16, V11.B16, V11.B16
+	VEOR V12.B16, V12.B16, V12.B16
+	VEOR V13.B16, V13.B16, V13.B16
+	VEOR V14.B16, V14.B16, V14.B16
+	VEOR V15.B16, V15.B16, V15.B16
+	VEOR V16.B16, V16.B16, V16.B16
+	VEOR V17.B16, V17.B16, V17.B16
+	VEOR V18.B16, V18.B16, V18.B16
+	VEOR V19.B16, V19.B16, V19.B16
+	VEOR V20.B16, V20.B16, V20.B16
+	VEOR V21.B16, V21.B16, V21.B16
+	VEOR V22.B16, V22.B16, V22.B16
+	VEOR V23.B16, V23.B16, V23.B16
+
+	CBZ R0, writeback
+
+kloop:
+	// 8-row A slice into V24,V25.
+	VLD1.P 32(R1), [V24.S4, V25.S4]
+
+	// Columns 0-5: broadcast b0..b5, accumulate rows 0-3 then 4-7.
+	FMOVS (R2), F26
+	FMOVS 4(R2), F27
+	FMOVS 8(R2), F28
+	FMOVS 12(R2), F29
+	FMOVS 16(R2), F30
+	FMOVS 20(R2), F31
+	VDUP  V26.S[0], V26.S4
+	VDUP  V27.S[0], V27.S4
+	VDUP  V28.S[0], V28.S4
+	VDUP  V29.S[0], V29.S4
+	VDUP  V30.S[0], V30.S4
+	VDUP  V31.S[0], V31.S4
+
+	VFMLA V26.S4, V24.S4, V0.S4
+	VFMLA V27.S4, V24.S4, V2.S4
+	VFMLA V28.S4, V24.S4, V4.S4
+	VFMLA V29.S4, V24.S4, V6.S4
+	VFMLA V30.S4, V24.S4, V8.S4
+	VFMLA V31.S4, V24.S4, V10.S4
+	VFMLA V26.S4, V25.S4, V1.S4
+	VFMLA V27.S4, V25.S4, V3.S4
+	VFMLA V28.S4, V25.S4, V5.S4
+	VFMLA V29.S4, V25.S4, V7.S4
+	VFMLA V30.S4, V25.S4, V9.S4
+	VFMLA V31.S4, V25.S4, V11.S4
+
+	// Columns 6-11: reuse V26..V31 for b6..b11.
+	FMOVS 24(R2), F26
+	FMOVS 28(R2), F27
+	FMOVS 32(R2), F28
+	FMOVS 36(R2), F29
+	FMOVS 40(R2), F30
+	FMOVS 44(R2), F31
+	ADD   $48, R2, R2
+	VDUP  V26.S[0], V26.S4
+	VDUP  V27.S[0], V27.S4
+	VDUP  V28.S[0], V28.S4
+	VDUP  V29.S[0], V29.S4
+	VDUP  V30.S[0], V30.S4
+	VDUP  V31.S[0], V31.S4
+
+	VFMLA V26.S4, V24.S4, V12.S4
+	VFMLA V27.S4, V24.S4, V14.S4
+	VFMLA V28.S4, V24.S4, V16.S4
+	VFMLA V29.S4, V24.S4, V18.S4
+	VFMLA V30.S4, V24.S4, V20.S4
+	VFMLA V31.S4, V24.S4, V22.S4
+	VFMLA V26.S4, V25.S4, V13.S4
+	VFMLA V27.S4, V25.S4, V15.S4
+	VFMLA V28.S4, V25.S4, V17.S4
+	VFMLA V29.S4, V25.S4, V19.S4
+	VFMLA V30.S4, V25.S4, V21.S4
+	VFMLA V31.S4, V25.S4, V23.S4
+
+	SUB  $1, R0, R0
+	CBNZ R0, kloop
+
+writeback:
+	// V24 = [1,1,1,1]; C(:,j) += acc via VFMLA against ones.
+	FMOVS $1.0, F24
+	VDUP  V24.S[0], V24.S4
+
+	MOVD R3, R5
+	VLD1 (R5), [V26.S4, V27.S4]
+	VFMLA V24.S4, V0.S4, V26.S4
+	VFMLA V24.S4, V1.S4, V27.S4
+	VST1 [V26.S4, V27.S4], (R5)
+
+	ADD  R4, R5, R5
+	VLD1 (R5), [V26.S4, V27.S4]
+	VFMLA V24.S4, V2.S4, V26.S4
+	VFMLA V24.S4, V3.S4, V27.S4
+	VST1 [V26.S4, V27.S4], (R5)
+
+	ADD  R4, R5, R5
+	VLD1 (R5), [V26.S4, V27.S4]
+	VFMLA V24.S4, V4.S4, V26.S4
+	VFMLA V24.S4, V5.S4, V27.S4
+	VST1 [V26.S4, V27.S4], (R5)
+
+	ADD  R4, R5, R5
+	VLD1 (R5), [V26.S4, V27.S4]
+	VFMLA V24.S4, V6.S4, V26.S4
+	VFMLA V24.S4, V7.S4, V27.S4
+	VST1 [V26.S4, V27.S4], (R5)
+
+	ADD  R4, R5, R5
+	VLD1 (R5), [V26.S4, V27.S4]
+	VFMLA V24.S4, V8.S4, V26.S4
+	VFMLA V24.S4, V9.S4, V27.S4
+	VST1 [V26.S4, V27.S4], (R5)
+
+	ADD  R4, R5, R5
+	VLD1 (R5), [V26.S4, V27.S4]
+	VFMLA V24.S4, V10.S4, V26.S4
+	VFMLA V24.S4, V11.S4, V27.S4
+	VST1 [V26.S4, V27.S4], (R5)
+
+	ADD  R4, R5, R5
+	VLD1 (R5), [V26.S4, V27.S4]
+	VFMLA V24.S4, V12.S4, V26.S4
+	VFMLA V24.S4, V13.S4, V27.S4
+	VST1 [V26.S4, V27.S4], (R5)
+
+	ADD  R4, R5, R5
+	VLD1 (R5), [V26.S4, V27.S4]
+	VFMLA V24.S4, V14.S4, V26.S4
+	VFMLA V24.S4, V15.S4, V27.S4
+	VST1 [V26.S4, V27.S4], (R5)
+
+	ADD  R4, R5, R5
+	VLD1 (R5), [V26.S4, V27.S4]
+	VFMLA V24.S4, V16.S4, V26.S4
+	VFMLA V24.S4, V17.S4, V27.S4
+	VST1 [V26.S4, V27.S4], (R5)
+
+	ADD  R4, R5, R5
+	VLD1 (R5), [V26.S4, V27.S4]
+	VFMLA V24.S4, V18.S4, V26.S4
+	VFMLA V24.S4, V19.S4, V27.S4
+	VST1 [V26.S4, V27.S4], (R5)
+
+	ADD  R4, R5, R5
+	VLD1 (R5), [V26.S4, V27.S4]
+	VFMLA V24.S4, V20.S4, V26.S4
+	VFMLA V24.S4, V21.S4, V27.S4
+	VST1 [V26.S4, V27.S4], (R5)
+
+	ADD  R4, R5, R5
+	VLD1 (R5), [V26.S4, V27.S4]
+	VFMLA V24.S4, V22.S4, V26.S4
+	VFMLA V24.S4, V23.S4, V27.S4
+	VST1 [V26.S4, V27.S4], (R5)
+
+	RET

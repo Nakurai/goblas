@@ -71,17 +71,28 @@ premise).
 
 ### Current limitations (not done yet — fixable within the design)
 
-- **float64 only.** No `float32` (single precision) or complex routines. The whole library is
-  double precision. float32 would roughly double SIMD throughput and is what most neural-net
-  training wants — it is a natural future addition, just not built.
-- **Assembly coverage is nearly complete on ARM64.** All five Level-3 routines
-  (`Dgemm`/`Dsyrk`/`Dtrsm`/`Dsymm`/`Dtrmm`) route their bulk FLOPs through the NEON `Dgemm`; the
-  hot Level-2 routines (`Dgemv`, `Dger`, `Dtrsv`) are NEON-accelerated; and the Level-1 reductions
-  `Dnrm2`/`Dasum` now have NEON kernels too. The one routine still on the pure-Go path is
-  **`Idamax`** — *by necessity, not omission*: it needs a vectorized argmax, and Go's arm64
-  assembler exposes no vector floating-point max or vector compare (`VFMAX`/`VCMHI` are
-  unrecognized — the same narrow-NEON-support limitation that makes `VADD` an integer add), so
-  there is no clean way to express it. `Dcopy`/`Dswap` already lower to `memmove`-class code.
+- **No complex routines.** float64 and float32 (single precision) are both implemented; complex
+  (`c`/`z`) types are not. Single precision shares the entire blocked driver and triangular
+  recursion with float64 via Go generics — only the leaf micro-kernels differ — and runs ~1.57×
+  the float64 `Dgemm` (4 float32 per NEON register vs 2 float64).
+- **High-level float32 linear algebra is goblas-native (the `mat32` package), not Gonum.** Gonum
+  ships a `lapack64` but **no `lapack32`**, and `gonum/mat` is float64-only (no `mat32`, no
+  `.Solve32()`). Two complementary answers: `blasadapt.Use32()` accelerates BLAS-level float32
+  work (`blas32.Gemm`/`Gemv`/`Trsm`/`Syrk`/… on `blas32.General`); and the **`mat32` package**
+  provides a native float32 matrix type — `Dense32` arithmetic plus `Cholesky32`/`LU32` solves
+  that are **end-to-end float32 (no casting)**, running their trailing FLOPs on the goblas
+  `S`-kernels. The advanced factorizations (`QR32`/`SVD32`/`EigenSym32`/`Eigen32`) are provided
+  via a float64 bridge to gonum and *do* cast internally — a full native float32 LAPACK port (to
+  make those no-cast too) remains future work.
+- **Assembly coverage is nearly complete on ARM64, for both precisions.** All five Level-3
+  routines (`Dgemm`/`Dsyrk`/`Dtrsm`/`Dsymm`/`Dtrmm` and the `S*` twins) route their bulk FLOPs
+  through the NEON `Dgemm`/`Sgemm`; the hot Level-2 routines (`Dgemv`/`Sgemv`, `Dger`/`Sger`,
+  `Dtrsv`/`Strsv`) are NEON-accelerated; and the Level-1 routines have NEON `.D2`/`.S4` kernels.
+  The one routine still on the pure-Go path in each precision is **`Idamax`/`Isamax`** — *by
+  necessity, not omission*: it needs a vectorized argmax, and Go's arm64 assembler exposes no
+  vector floating-point max or vector compare (`VFMAX`/`VCMHI` are unrecognized — the same
+  narrow-NEON-support limitation that makes `VADD` an integer add), so there is no clean way to
+  express it. `Dcopy`/`Dswap` (and `Scopy`/`Sswap`) already lower to `memmove`-class code.
   This acceleration is **ARM64-only for Level 1/2**: on x86-64 the AVX2 kernel covers the
   Level-3 routines (their bulk runs on the AVX2 `Dgemm`), but `Dgemv`/`Dger`/`Dtrsv` and the
   Level-1 routines fall back to pure Go there, since they reuse NEON primitives with no AVX2

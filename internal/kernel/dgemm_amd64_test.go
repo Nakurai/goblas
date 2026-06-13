@@ -69,7 +69,7 @@ func TestDgemmAVX2MatchesGeneric(t *testing.T) {
 							cg[i], cn[i] = v, v
 						}
 
-						dgemmNaive(transA, transB, d.m, d.n, d.k, alpha, a, lda, b, ldb, beta, cg, ldc)
+						gemmNaive(transA, transB, d.m, d.n, d.k, alpha, a, lda, b, ldb, beta, cg, ldc)
 						ak.Dgemm(transA, transB, d.m, d.n, d.k, alpha, a, lda, b, ldb, beta, cn, ldc)
 
 						for i := range cg {

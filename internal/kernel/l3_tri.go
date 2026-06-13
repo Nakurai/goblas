@@ -10,8 +10,9 @@ package kernel
 // the NEON/AVX2 kernels feed it the assembly-backed one — the heavy lifting
 // always lands on the fastest gemm available.
 
-// dgemmFunc is the signature shared by every Dgemm implementation.
-type dgemmFunc func(transA, transB bool, m, n, k int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int)
+// gemmFunc is the element-generic signature shared by every gemm
+// implementation (Dgemm at float64, Sgemm at float32).
+type gemmFunc[T float] func(transA, transB bool, m, n, k int, alpha T, a []T, lda int, b []T, ldb int, beta T, c []T, ldc int)
 
 // triBase is the cutoff below which Dsyrk/Dtrsm stop recursing and run the
 // column-oriented base case.
@@ -40,7 +41,7 @@ func (g genericKernel) Dtrmm(left, upper, transA, unit bool, m, n int, alpha flo
 // dsyrkRec recursively splits C into [C11 C12; C21 C22]. The diagonal blocks
 // are syrk subproblems; the off-diagonal block in the stored triangle is a
 // plain gemm between the two halves of A.
-func dsyrkRec(gemm dgemmFunc, upper, trans bool, n, k int, alpha float64, a []float64, lda int, beta float64, c []float64, ldc int) {
+func dsyrkRec[T float](gemm gemmFunc[T], upper, trans bool, n, k int, alpha T, a []T, lda int, beta T, c []T, ldc int) {
 	if n == 0 {
 		return
 	}
@@ -52,7 +53,7 @@ func dsyrkRec(gemm dgemmFunc, upper, trans bool, n, k int, alpha float64, a []fl
 	n2 := n - n1
 
 	// Halves of A: rows (trans=false) or columns (trans=true) [0,n1) and [n1,n).
-	var a1, a2 []float64
+	var a1, a2 []T
 	if !trans {
 		a1, a2 = a, a[n1:] // A is n x k: split rows
 	} else {
@@ -79,7 +80,7 @@ func dsyrkRec(gemm dgemmFunc, upper, trans bool, n, k int, alpha float64, a []fl
 }
 
 // dsyrkBase is the column-oriented reference syrk for small n.
-func dsyrkBase(upper, trans bool, n, k int, alpha float64, a []float64, lda int, beta float64, c []float64, ldc int) {
+func dsyrkBase[T float](upper, trans bool, n, k int, alpha T, a []T, lda int, beta T, c []T, ldc int) {
 	// Scale the stored triangle of C by beta.
 	for j := 0; j < n; j++ {
 		lo, hi := 0, j+1 // upper: rows [0, j]
@@ -134,7 +135,7 @@ func dsyrkBase(upper, trans bool, n, k int, alpha float64, a []float64, lda int,
 		}
 		for i := lo; i < hi; i++ {
 			ai := a[i*lda : i*lda+k]
-			var s float64
+			var s T
 			for l := range aj {
 				s += ai[l] * aj[l]
 			}
@@ -149,7 +150,7 @@ func dsyrkBase(upper, trans bool, n, k int, alpha float64, a []float64, lda int,
 // [A11 A12; A21 A22] (A12 = 0 for lower, A21 = 0 for upper). One diagonal
 // block is solved first, the off-diagonal block update is a gemm against the
 // not-yet-solved part of B, then the other diagonal block is solved.
-func dtrsmRec(gemm dgemmFunc, left, upper, transA, unit bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int) {
+func dtrsmRec[T float](gemm gemmFunc[T], left, upper, transA, unit bool, m, n int, alpha T, a []T, lda int, b []T, ldb int) {
 	if m == 0 || n == 0 {
 		return
 	}
@@ -226,7 +227,7 @@ func dtrsmRec(gemm dgemmFunc, left, upper, transA, unit bool, m, n int, alpha fl
 }
 
 // dtrsmBase is the column-oriented reference trsm (netlib structure).
-func dtrsmBase(left, upper, transA, unit bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int) {
+func dtrsmBase[T float](left, upper, transA, unit bool, m, n int, alpha T, a []T, lda int, b []T, ldb int) {
 	if left && !transA {
 		// Per-column substitution on op(A) = A.
 		for j := 0; j < n; j++ {
@@ -416,7 +417,7 @@ func dtrsmBase(left, upper, transA, unit bool, m, n int, alpha float64, a []floa
 // the stored block and one using its transpose — so the bulk FLOPs land on the
 // fast gemm. The non-symmetric dimension is left whole and handled by the
 // gemm's own blocking, mirroring dsyrkRec/dtrsmRec.
-func dsymmRec(gemm dgemmFunc, left, upper bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int) {
+func dsymmRec[T float](gemm gemmFunc[T], left, upper bool, m, n int, alpha T, a []T, lda int, b []T, ldb int, beta T, c []T, ldc int) {
 	if m == 0 || n == 0 {
 		return
 	}
@@ -472,14 +473,14 @@ func dsymmRec(gemm dgemmFunc, left, upper bool, m, n int, alpha float64, a []flo
 }
 
 // symAt reads symmetric A(i,j) from the stored triangle.
-func symAt(a []float64, lda, i, j int, upper bool) float64 {
+func symAt[T float](a []T, lda, i, j int, upper bool) T {
 	if (i <= j) == upper || i == j {
 		return a[i+j*lda]
 	}
 	return a[j+i*lda]
 }
 
-func dsymmRef(left, upper bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int) {
+func dsymmRef[T float](left, upper bool, m, n int, alpha T, a []T, lda int, b []T, ldb int, beta T, c []T, ldc int) {
 	// C = beta*C.
 	for j := 0; j < n; j++ {
 		col := c[j*ldc : j*ldc+m]
@@ -537,7 +538,7 @@ func dsymmRef(left, upper bool, m, n int, alpha float64, a []float64, lda int, b
 // (right). The off-diagonal contribution is a gemm against the not-yet-
 // overwritten half of B, sequenced so the in-place update reads originals
 // before they are replaced. Diagonal blocks recurse to dtrmmRef.
-func dtrmmRec(gemm dgemmFunc, left, upper, transA, unit bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int) {
+func dtrmmRec[T float](gemm gemmFunc[T], left, upper, transA, unit bool, m, n int, alpha T, a []T, lda int, b []T, ldb int) {
 	if m == 0 || n == 0 {
 		return
 	}
@@ -595,7 +596,7 @@ func dtrmmRec(gemm dgemmFunc, left, upper, transA, unit bool, m, n int, alpha fl
 	}
 }
 
-func dtrmmRef(left, upper, transA, unit bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int) {
+func dtrmmRef[T float](left, upper, transA, unit bool, m, n int, alpha T, a []T, lda int, b []T, ldb int) {
 	if left && !transA {
 		for j := 0; j < n; j++ {
 			col := b[j*ldb : j*ldb+m]

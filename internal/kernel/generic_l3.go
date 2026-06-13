@@ -2,21 +2,27 @@ package kernel
 
 // Dgemm computes C = alpha*op(A)*op(B) + beta*C using the shared blocked,
 // goroutine-parallel driver with the pure-Go micro-kernel. This is the
-// portable fast path for hosts without an assembly kernel. Tiny problems
-// skip the blocking machinery: packing overhead would dominate.
+// portable fast path for hosts without an assembly kernel.
 func (genericKernel) Dgemm(transA, transB bool, m, n, k int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int) {
-	if m*n*k < 16*16*16 {
-		dgemmNaive(transA, transB, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
-		return
-	}
-	dgemmBlocked(dgemmKernel8x4Go, dgemmNR, transA, transB, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
+	gemmGeneric(transA, transB, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
 }
 
-// dgemmNaive is the straightforward column-at-a-time implementation. It is
+// gemmGeneric is the element-generic pure-Go matrix multiply behind both Dgemm
+// and Sgemm. Tiny problems skip the blocking machinery: packing overhead would
+// dominate.
+func gemmGeneric[T float](transA, transB bool, m, n, k int, alpha T, a []T, lda int, b []T, ldb int, beta T, c []T, ldc int) {
+	if m*n*k < 16*16*16 {
+		gemmNaive(transA, transB, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
+		return
+	}
+	gemmBlocked(gemmKernel8x4Go[T], dgemmNR, transA, transB, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
+}
+
+// gemmNaive is the straightforward column-at-a-time implementation. It is
 // the correctness reference for the blocked/tiled implementations (tests
 // compare both the generic and assembly kernels against it) and the fast
 // path for tiny matrices where packing overhead dominates.
-func dgemmNaive(transA, transB bool, m, n, k int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int) {
+func gemmNaive[T float](transA, transB bool, m, n, k int, alpha T, a []T, lda int, b []T, ldb int, beta T, c []T, ldc int) {
 	if m == 0 || n == 0 {
 		return
 	}
@@ -47,7 +53,7 @@ func dgemmNaive(transA, transB bool, m, n, k int, alpha float64, a []float64, ld
 		cc := c[j*ldc : j*ldc+m]
 		for l := 0; l < k; l++ {
 			// op(B)(l,j)
-			var bval float64
+			var bval T
 			if !transB {
 				bval = b[l+j*ldb]
 			} else {

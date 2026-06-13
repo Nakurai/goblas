@@ -103,11 +103,17 @@ only the innermost loop — the **micro-kernel** — and it has a fixed, simple 
 > column by column), `B_panel` is `k` consecutive groups of `NR` float64 (a horizontal strip
 > of B, row by row), and `C` is column-major with a leading dimension `ldc` you are told.
 
-`MR` and `NR` are the tile dimensions (8×4 for the existing kernels). Because the panels are
-pre-packed into contiguous memory, your inner loop is just: load `MR` values of A, broadcast
-each of `NR` values of B, multiply-accumulate into `MR×NR` running totals, repeat `k` times,
-then add the totals into C. That is the entire algorithm. The packing that makes this possible
-is `packAPanels` / `packBPanels` in the driver.
+`MR` and `NR` are the tile dimensions (8×4/8×6 for the float64 kernels, 8×8 for the float32 one).
+Because the panels are pre-packed into contiguous memory, your inner loop is just: load `MR`
+values of A, broadcast each of `NR` values of B, multiply-accumulate into `MR×NR` running totals,
+repeat `k` times, then add the totals into C. That is the entire algorithm. The packing that
+makes this possible is `packAPanels` / `packBPanels` in the driver.
+
+The driver, packing, and triangular/symmetric recursion are **generic over the element type**
+(`gemmBlocked[T float32|float64]`, `microKernel[T]`), so a new architecture can add a float64
+kernel, a float32 kernel, or both — each is just a micro-kernel satisfying the same contract at
+its element type, registered in `Select` (float64) / `Select32` (float32). `Isamax`/`Idamax`
+stay on the pure-Go path everywhere (no vectorizable argmax in Go's assembler).
 
 ### The files you add (mirroring the amd64 example)
 

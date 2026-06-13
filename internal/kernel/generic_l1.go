@@ -1,9 +1,11 @@
 package kernel
 
-import "math"
+// The Level-1 routines are written once as element-generic free functions and
+// exposed as both the float64 (D) and float32 (S) kernel methods. The method
+// wrappers live here for float64; the float32 wrappers are in generic32.go.
 
-func (genericKernel) Ddot(n int, x []float64, incX int, y []float64, incY int) float64 {
-	var sum float64
+func ddotGeneric[T float](n int, x []T, incX int, y []T, incY int) T {
+	var sum T
 	if incX == 1 && incY == 1 {
 		x = x[:n]
 		for i, v := range x {
@@ -20,7 +22,7 @@ func (genericKernel) Ddot(n int, x []float64, incX int, y []float64, incY int) f
 	return sum
 }
 
-func (genericKernel) Daxpy(n int, alpha float64, x []float64, incX int, y []float64, incY int) {
+func daxpyGeneric[T float](n int, alpha T, x []T, incX int, y []T, incY int) {
 	if alpha == 0 {
 		return
 	}
@@ -39,7 +41,7 @@ func (genericKernel) Daxpy(n int, alpha float64, x []float64, incX int, y []floa
 	}
 }
 
-func (genericKernel) Dscal(n int, alpha float64, x []float64, incX int) {
+func dscalGeneric[T float](n int, alpha T, x []T, incX int) {
 	if incX == 1 {
 		x = x[:n]
 		for i := range x {
@@ -54,21 +56,21 @@ func (genericKernel) Dscal(n int, alpha float64, x []float64, incX int) {
 	}
 }
 
-func (genericKernel) Dnrm2(n int, x []float64, incX int) float64 {
+func dnrm2Generic[T float](n int, x []T, incX int) T {
 	if n < 1 {
 		return 0
 	}
 	if n == 1 {
-		return math.Abs(x[0])
+		return absT(x[0])
 	}
 	// Scaled accumulation to avoid overflow/underflow (LAPACK dnrm2 algorithm).
-	var scale float64
-	ssq := 1.0
+	var scale T
+	var ssq T = 1
 	ix := firstIndex(n, incX)
 	for i := 0; i < n; i++ {
 		v := x[ix]
 		if v != 0 {
-			a := math.Abs(v)
+			a := absT(v)
 			if scale < a {
 				ssq = 1 + ssq*(scale/a)*(scale/a)
 				scale = a
@@ -78,37 +80,37 @@ func (genericKernel) Dnrm2(n int, x []float64, incX int) float64 {
 		}
 		ix += incX
 	}
-	return scale * math.Sqrt(ssq)
+	return scale * sqrtT(ssq)
 }
 
-func (genericKernel) Dasum(n int, x []float64, incX int) float64 {
-	var sum float64
+func dasumGeneric[T float](n int, x []T, incX int) T {
+	var sum T
 	if incX == 1 {
 		x = x[:n]
 		for _, v := range x {
-			sum += math.Abs(v)
+			sum += absT(v)
 		}
 		return sum
 	}
 	ix := firstIndex(n, incX)
 	for i := 0; i < n; i++ {
-		sum += math.Abs(x[ix])
+		sum += absT(x[ix])
 		ix += incX
 	}
 	return sum
 }
 
-func (genericKernel) Idamax(n int, x []float64, incX int) int {
+func idamaxGeneric[T float](n int, x []T, incX int) int {
 	if n < 1 {
 		return -1
 	}
 	ix := firstIndex(n, incX)
 	best := 0
-	max := math.Abs(x[ix])
+	maxv := absT(x[ix])
 	ix += incX
 	for i := 1; i < n; i++ {
-		if a := math.Abs(x[ix]); a > max {
-			max = a
+		if a := absT(x[ix]); a > maxv {
+			maxv = a
 			best = i
 		}
 		ix += incX
@@ -116,7 +118,7 @@ func (genericKernel) Idamax(n int, x []float64, incX int) int {
 	return best
 }
 
-func (genericKernel) Dcopy(n int, x []float64, incX int, y []float64, incY int) {
+func dcopyGeneric[T float](n int, x []T, incX int, y []T, incY int) {
 	if incX == 1 && incY == 1 {
 		copy(y[:n], x[:n])
 		return
@@ -129,7 +131,7 @@ func (genericKernel) Dcopy(n int, x []float64, incX int, y []float64, incY int) 
 	}
 }
 
-func (genericKernel) Dswap(n int, x []float64, incX int, y []float64, incY int) {
+func dswapGeneric[T float](n int, x []T, incX int, y []T, incY int) {
 	if incX == 1 && incY == 1 {
 		x, y = x[:n], y[:n]
 		for i, v := range x {
@@ -144,6 +146,40 @@ func (genericKernel) Dswap(n int, x []float64, incX int, y []float64, incY int) 
 		ix += incX
 		iy += incY
 	}
+}
+
+// --- float64 (D) method wrappers ---
+
+func (genericKernel) Ddot(n int, x []float64, incX int, y []float64, incY int) float64 {
+	return ddotGeneric(n, x, incX, y, incY)
+}
+
+func (genericKernel) Daxpy(n int, alpha float64, x []float64, incX int, y []float64, incY int) {
+	daxpyGeneric(n, alpha, x, incX, y, incY)
+}
+
+func (genericKernel) Dscal(n int, alpha float64, x []float64, incX int) {
+	dscalGeneric(n, alpha, x, incX)
+}
+
+func (genericKernel) Dnrm2(n int, x []float64, incX int) float64 {
+	return dnrm2Generic(n, x, incX)
+}
+
+func (genericKernel) Dasum(n int, x []float64, incX int) float64 {
+	return dasumGeneric(n, x, incX)
+}
+
+func (genericKernel) Idamax(n int, x []float64, incX int) int {
+	return idamaxGeneric(n, x, incX)
+}
+
+func (genericKernel) Dcopy(n int, x []float64, incX int, y []float64, incY int) {
+	dcopyGeneric(n, x, incX, y, incY)
+}
+
+func (genericKernel) Dswap(n int, x []float64, incX int, y []float64, incY int) {
+	dswapGeneric(n, x, incX, y, incY)
 }
 
 // firstIndex returns the starting offset into a strided vector of n elements.

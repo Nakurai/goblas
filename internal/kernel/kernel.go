@@ -69,3 +69,34 @@ type Kernel interface {
 	// (left false) in place, where A is triangular. B is m by n.
 	Dtrmm(left, upper, transA, unit bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int)
 }
+
+// Kernel32 is the float32 (single-precision, S-prefixed) counterpart of Kernel.
+// It mirrors Kernel routine-for-routine; the two are the same algorithms
+// instantiated at the two element types (see float.go). Implementations must be
+// safe for concurrent use.
+type Kernel32 interface {
+	// --- Level 1: vector-vector ---
+
+	Sdot(n int, x []float32, incX int, y []float32, incY int) float32
+	Saxpy(n int, alpha float32, x []float32, incX int, y []float32, incY int)
+	Sscal(n int, alpha float32, x []float32, incX int)
+	Snrm2(n int, x []float32, incX int) float32
+	Sasum(n int, x []float32, incX int) float32
+	Isamax(n int, x []float32, incX int) int
+	Scopy(n int, x []float32, incX int, y []float32, incY int)
+	Sswap(n int, x []float32, incX int, y []float32, incY int)
+
+	// --- Level 2: matrix-vector (column-major) ---
+
+	Sgemv(trans bool, m, n int, alpha float32, a []float32, lda int, x []float32, incX int, beta float32, y []float32, incY int)
+	Sger(m, n int, alpha float32, x []float32, incX int, y []float32, incY int, a []float32, lda int)
+	Strsv(upper, transA, unit bool, n int, a []float32, lda int, x []float32, incX int)
+
+	// --- Level 3: matrix-matrix (column-major) ---
+
+	Sgemm(transA, transB bool, m, n, k int, alpha float32, a []float32, lda int, b []float32, ldb int, beta float32, c []float32, ldc int)
+	Ssyrk(upper, trans bool, n, k int, alpha float32, a []float32, lda int, beta float32, c []float32, ldc int)
+	Strsm(left, upper, transA, unit bool, m, n int, alpha float32, a []float32, lda int, b []float32, ldb int)
+	Ssymm(left, upper bool, m, n int, alpha float32, a []float32, lda int, b []float32, ldb int, beta float32, c []float32, ldc int)
+	Strmm(left, upper, transA, unit bool, m, n int, alpha float32, a []float32, lda int, b []float32, ldb int)
+}

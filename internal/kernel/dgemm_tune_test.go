@@ -27,7 +27,7 @@ func BenchmarkDgemmBlockSweep(b *testing.B) {
 
 	kernels := []struct {
 		name string
-		mk   microKernel
+		mk   microKernel[float64]
 		nr   int
 	}{
 		{"8x4", dgemmKernel8x4, 4},

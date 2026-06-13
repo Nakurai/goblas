@@ -1,6 +1,6 @@
 package kernel
 
-func (k genericKernel) Dgemv(trans bool, m, n int, alpha float64, a []float64, lda int, x []float64, incX int, beta float64, y []float64, incY int) {
+func dgemvGeneric[T float](trans bool, m, n int, alpha T, a []T, lda int, x []T, incX int, beta T, y []T, incY int) {
 	// Length of y (rows of op(A)) and of x (cols of op(A)).
 	lenY, lenX := m, n
 	if trans {
@@ -39,7 +39,7 @@ func (k genericKernel) Dgemv(trans bool, m, n int, alpha float64, a []float64, l
 	jy := firstIndex(lenY, incY)
 	for j := 0; j < n; j++ {
 		col := a[j*lda : j*lda+m]
-		var sum float64
+		var sum T
 		ix := firstIndex(lenX, incX)
 		for _, v := range col {
 			sum += v * x[ix]
@@ -50,7 +50,7 @@ func (k genericKernel) Dgemv(trans bool, m, n int, alpha float64, a []float64, l
 	}
 }
 
-func (genericKernel) Dger(m, n int, alpha float64, x []float64, incX int, y []float64, incY int, a []float64, lda int) {
+func dgerGeneric[T float](m, n int, alpha T, x []T, incX int, y []T, incY int, a []T, lda int) {
 	if alpha == 0 {
 		return
 	}
@@ -68,7 +68,7 @@ func (genericKernel) Dger(m, n int, alpha float64, x []float64, incX int, y []fl
 	}
 }
 
-func (genericKernel) Dtrsv(upper, transA, unit bool, n int, a []float64, lda int, x []float64, incX int) {
+func dtrsvGeneric[T float](upper, transA, unit bool, n int, a []T, lda int, x []T, incX int) {
 	if n == 0 {
 		return
 	}
@@ -135,7 +135,7 @@ func (genericKernel) Dtrsv(upper, transA, unit bool, n int, a []float64, lda int
 }
 
 // scaleStrided computes y = beta*y for a length-n strided vector.
-func scaleStrided(n int, beta float64, y []float64, incY int) {
+func scaleStrided[T float](n int, beta T, y []T, incY int) {
 	if beta == 1 {
 		return
 	}
@@ -151,4 +151,18 @@ func scaleStrided(n int, beta float64, y []float64, incY int) {
 		y[iy] *= beta
 		iy += incY
 	}
+}
+
+// --- float64 (D) method wrappers ---
+
+func (k genericKernel) Dgemv(trans bool, m, n int, alpha float64, a []float64, lda int, x []float64, incX int, beta float64, y []float64, incY int) {
+	dgemvGeneric(trans, m, n, alpha, a, lda, x, incX, beta, y, incY)
+}
+
+func (genericKernel) Dger(m, n int, alpha float64, x []float64, incX int, y []float64, incY int, a []float64, lda int) {
+	dgerGeneric(m, n, alpha, x, incX, y, incY, a, lda)
+}
+
+func (genericKernel) Dtrsv(upper, transA, unit bool, n int, a []float64, lda int, x []float64, incX int) {
+	dtrsvGeneric(upper, transA, unit, n, a, lda, x, incX)
 }

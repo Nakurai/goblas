@@ -51,3 +51,14 @@ func Select(c cpu.CPU) Kernel {
 	}
 	return neonKernel{}
 }
+
+// Select32 mirrors Select for the float32 kernel. It reuses the blocking
+// parameters Select has already tuned (both are called once at startup).
+// neonKernel currently serves float32 through the embedded pure-Go reference;
+// single-precision assembly overrides land in later phases.
+func Select32(c cpu.CPU) Kernel32 {
+	if !c.HasNEON {
+		return genericKernel{}
+	}
+	return neonKernel{}
+}

@@ -9,10 +9,20 @@ import (
 // sink defeats dead-code elimination: benchmarked routines write a result here
 // so the compiler cannot prove their work is unused.
 var sink float64
+var sink32 float32
 
 func benchMatrix(seed int64, n int) []float64 {
 	r := rand.New(rand.NewSource(seed))
 	return randSlice(r, n)
+}
+
+func benchMatrix32(seed int64, n int) []float32 {
+	r := rand.New(rand.NewSource(seed))
+	s := make([]float32, n)
+	for i := range s {
+		s[i] = float32(r.NormFloat64())
+	}
+	return s
 }
 
 // BenchmarkDgemm reports GFLOPS (2*N^3 flops) across a range of square sizes so
