@@ -74,9 +74,18 @@ premise).
 - **float64 only.** No `float32` (single precision) or complex routines. The whole library is
   double precision. float32 would roughly double SIMD throughput and is what most neural-net
   training wants — it is a natural future addition, just not built.
-- **Assembly coverage is partial.** On ARM64, `Dgemm`/`Dsyrk`/`Dtrsm` run on NEON; `Dsymm`
-  and `Dtrmm` still use portable reference loops, and several Level-1/Level-2 routines fall
-  back to pure Go. More kernels can be added one at a time.
+- **Assembly coverage is nearly complete on ARM64.** All five Level-3 routines
+  (`Dgemm`/`Dsyrk`/`Dtrsm`/`Dsymm`/`Dtrmm`) route their bulk FLOPs through the NEON `Dgemm`; the
+  hot Level-2 routines (`Dgemv`, `Dger`, `Dtrsv`) are NEON-accelerated; and the Level-1 reductions
+  `Dnrm2`/`Dasum` now have NEON kernels too. The one routine still on the pure-Go path is
+  **`Idamax`** — *by necessity, not omission*: it needs a vectorized argmax, and Go's arm64
+  assembler exposes no vector floating-point max or vector compare (`VFMAX`/`VCMHI` are
+  unrecognized — the same narrow-NEON-support limitation that makes `VADD` an integer add), so
+  there is no clean way to express it. `Dcopy`/`Dswap` already lower to `memmove`-class code.
+  This acceleration is **ARM64-only for Level 1/2**: on x86-64 the AVX2 kernel covers the
+  Level-3 routines (their bulk runs on the AVX2 `Dgemm`), but `Dgemv`/`Dger`/`Dtrsv` and the
+  Level-1 routines fall back to pure Go there, since they reuse NEON primitives with no AVX2
+  equivalent yet.
 - **Only Apple Silicon is tuned.** Other ARM64 chips (Graviton, Snapdragon, …) get the NEON
   kernels with conservative, cache-size-derived blocking rather than a hand-tuned sweep.
 - **The AVX2 (x86-64) kernel is unverified on real hardware.** It was written and checked by

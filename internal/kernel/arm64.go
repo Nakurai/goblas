@@ -25,6 +25,14 @@ func (nk neonKernel) Dtrsm(left, upper, transA, unit bool, m, n int, alpha float
 	dtrsmRec(nk.Dgemm, left, upper, transA, unit, m, n, alpha, a, lda, b, ldb)
 }
 
+func (nk neonKernel) Dsymm(left, upper bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int) {
+	dsymmRec(nk.Dgemm, left, upper, m, n, alpha, a, lda, b, ldb, beta, c, ldc)
+}
+
+func (nk neonKernel) Dtrmm(left, upper, transA, unit bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int) {
+	dtrmmRec(nk.Dgemm, left, upper, transA, unit, m, n, alpha, a, lda, b, ldb)
+}
+
 // Select routes any NEON-capable ARM64 host to the NEON kernel (NEON/ASIMD is
 // mandatory on ARM64, so in practice all of them). Blocking parameters are
 // tuned per microarchitecture: the M5 Pro values are the Phase 6 sweep

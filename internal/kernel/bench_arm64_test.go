@@ -50,3 +50,45 @@ func BenchmarkDgemvGenericVsNEON(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkDasumGenericVsNEON and BenchmarkDnrm2GenericVsNEON report the L1
+// reduction speedup from the Phase-15 NEON kernels. Run e.g.:
+//
+//	go test -run '^$' -bench 'Dasum|Dnrm2' ./internal/kernel/
+func BenchmarkDasumGenericVsNEON(b *testing.B) {
+	g := genericKernel{}
+	nk := neonKernel{}
+	const n = 1 << 16
+	x := kRandSlice(1, n)
+	b.Run("generic", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			kSink += g.Dasum(n, x, 1)
+		}
+		b.ReportMetric(float64(n)/kSecPerOp(b)/1e9, "Gelem/s")
+	})
+	b.Run("neon", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			kSink += nk.Dasum(n, x, 1)
+		}
+		b.ReportMetric(float64(n)/kSecPerOp(b)/1e9, "Gelem/s")
+	})
+}
+
+func BenchmarkDnrm2GenericVsNEON(b *testing.B) {
+	g := genericKernel{}
+	nk := neonKernel{}
+	const n = 1 << 16
+	x := kRandSlice(2, n)
+	b.Run("generic", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			kSink += g.Dnrm2(n, x, 1)
+		}
+		b.ReportMetric(float64(n)/kSecPerOp(b)/1e9, "Gelem/s")
+	})
+	b.Run("neon", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			kSink += nk.Dnrm2(n, x, 1)
+		}
+		b.ReportMetric(float64(n)/kSecPerOp(b)/1e9, "Gelem/s")
+	})
+}

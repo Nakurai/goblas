@@ -2,14 +2,13 @@ package kernel
 
 // This file implements the triangular and symmetric Level-3 routines.
 //
-// Dsyrk and Dtrsm use recursive blocking: the triangular matrix is split in
-// half, the off-diagonal block update becomes a Dgemm (where the FLOPs are),
-// and the two diagonal blocks recurse down to a small column-oriented base
-// case. The recursion is parameterized by the gemm to use, so the generic
-// kernel feeds it the portable blocked gemm and the NEON kernel feeds it the
-// assembly-backed one — the heavy lifting always lands on the fastest gemm
-// available. Dsymm and Dtrmm are reference column-oriented loops (they are
-// rarely hot in LAPACK workloads; blocked variants can come later).
+// All four (Dsyrk, Dtrsm, Dsymm, Dtrmm) use recursive blocking: the
+// triangular/symmetric matrix is split in half, the off-diagonal block update
+// becomes a Dgemm (where the FLOPs are), and the two diagonal blocks recurse
+// down to a small column-oriented base case. The recursion is parameterized by
+// the gemm to use, so the generic kernel feeds it the portable blocked gemm and
+// the NEON/AVX2 kernels feed it the assembly-backed one — the heavy lifting
+// always lands on the fastest gemm available.
 
 // dgemmFunc is the signature shared by every Dgemm implementation.
 type dgemmFunc func(transA, transB bool, m, n, k int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int)
@@ -28,12 +27,12 @@ func (g genericKernel) Dtrsm(left, upper, transA, unit bool, m, n int, alpha flo
 	dtrsmRec(g.Dgemm, left, upper, transA, unit, m, n, alpha, a, lda, b, ldb)
 }
 
-func (genericKernel) Dsymm(left, upper bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int) {
-	dsymmRef(left, upper, m, n, alpha, a, lda, b, ldb, beta, c, ldc)
+func (g genericKernel) Dsymm(left, upper bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int) {
+	dsymmRec(g.Dgemm, left, upper, m, n, alpha, a, lda, b, ldb, beta, c, ldc)
 }
 
-func (genericKernel) Dtrmm(left, upper, transA, unit bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int) {
-	dtrmmRef(left, upper, transA, unit, m, n, alpha, a, lda, b, ldb)
+func (g genericKernel) Dtrmm(left, upper, transA, unit bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int) {
+	dtrmmRec(g.Dgemm, left, upper, transA, unit, m, n, alpha, a, lda, b, ldb)
 }
 
 // --- Dsyrk: C = alpha*A*A^T + beta*C (or A^T*A), one triangle of C ---
@@ -167,14 +166,14 @@ func dtrsmRec(gemm dgemmFunc, left, upper, transA, unit bool, m, n int, alpha fl
 
 	a11 := a
 	a22 := a[d1+d1*lda:]
-	aOff := a[d1:]      // A21 (lower): d2 x d1
+	aOff := a[d1:] // A21 (lower): d2 x d1
 	if upper {
 		aOff = a[d1*lda:] // A12 (upper): d1 x d2
 	}
 
 	if left {
-		b1 := b           // rows [0, d1)
-		b2 := b[d1:]      // rows [d1, m)
+		b1 := b      // rows [0, d1)
+		b2 := b[d1:] // rows [d1, m)
 		// Solve order depends on which off-diagonal block is nonzero and
 		// whether A is transposed: solve the block whose equation involves
 		// only itself first.
@@ -202,8 +201,8 @@ func dtrsmRec(gemm dgemmFunc, left, upper, transA, unit bool, m, n int, alpha fl
 	}
 
 	// Right side: X op(A) = alpha*B; split B by columns.
-	b1 := b           // cols [0, d1)
-	b2 := b[d1*ldb:]  // cols [d1, n)
+	b1 := b                        // cols [0, d1)
+	b2 := b[d1*ldb:]               // cols [d1, n)
 	solveFirst1 := upper != transA // upper+notrans or lower+trans: left cols first
 	if solveFirst1 {
 		dtrsmRec(gemm, left, upper, transA, unit, m, d1, alpha, a11, lda, b1, ldb)
@@ -411,6 +410,67 @@ func dtrsmBase(left, upper, transA, unit bool, m, n int, alpha float64, a []floa
 
 // --- Dsymm: C = alpha*A*B + beta*C with symmetric A (one triangle stored) ---
 
+// dsymmRec recursively splits the symmetric matrix A into [A11 A12; A21 A22]
+// (A21 = A12^T; only one triangle is stored). The diagonal blocks are symm
+// subproblems; the off-diagonal block contributes two plain gemms — one using
+// the stored block and one using its transpose — so the bulk FLOPs land on the
+// fast gemm. The non-symmetric dimension is left whole and handled by the
+// gemm's own blocking, mirroring dsyrkRec/dtrsmRec.
+func dsymmRec(gemm dgemmFunc, left, upper bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int) {
+	if m == 0 || n == 0 {
+		return
+	}
+	d := m // the symmetric dimension
+	if !left {
+		d = n
+	}
+	if d <= triBase {
+		dsymmRef(left, upper, m, n, alpha, a, lda, b, ldb, beta, c, ldc)
+		return
+	}
+	d1 := d / 2
+	d2 := d - d1
+
+	a11 := a
+	a22 := a[d1+d1*lda:]
+	// Stored off-diagonal block: A12 (d1 x d2) at a[d1*lda:] for upper, or
+	// A21 (d2 x d1) at a[d1:] for lower.
+	aOff := a[d1:]
+	if upper {
+		aOff = a[d1*lda:]
+	}
+
+	if left {
+		b1, b2 := b, b[d1:]
+		c1, c2 := c, c[d1:]
+		// Diagonal blocks apply beta (their C regions are disjoint).
+		dsymmRec(gemm, left, upper, d1, n, alpha, a11, lda, b1, ldb, beta, c1, ldc)
+		dsymmRec(gemm, left, upper, d2, n, alpha, a22, lda, b2, ldb, beta, c2, ldc)
+		// Off-diagonal cross terms accumulate into the already-scaled C.
+		if upper { // aOff = A12 (d1 x d2)
+			gemm(false, false, d1, n, d2, alpha, aOff, lda, b2, ldb, 1, c1, ldc)
+			gemm(true, false, d2, n, d1, alpha, aOff, lda, b1, ldb, 1, c2, ldc)
+		} else { // aOff = A21 (d2 x d1)
+			gemm(false, false, d2, n, d1, alpha, aOff, lda, b1, ldb, 1, c2, ldc)
+			gemm(true, false, d1, n, d2, alpha, aOff, lda, b2, ldb, 1, c1, ldc)
+		}
+		return
+	}
+
+	// Right: C = alpha*B*A + beta*C; split B and C by columns.
+	b1, b2 := b, b[d1*ldb:]
+	c1, c2 := c, c[d1*ldc:]
+	dsymmRec(gemm, left, upper, m, d1, alpha, a11, lda, b1, ldb, beta, c1, ldc)
+	dsymmRec(gemm, left, upper, m, d2, alpha, a22, lda, b2, ldb, beta, c2, ldc)
+	if upper { // aOff = A12 (d1 x d2)
+		gemm(false, false, m, d2, d1, alpha, b1, ldb, aOff, lda, 1, c2, ldc)
+		gemm(false, true, m, d1, d2, alpha, b2, ldb, aOff, lda, 1, c1, ldc)
+	} else { // aOff = A21 (d2 x d1)
+		gemm(false, false, m, d1, d2, alpha, b2, ldb, aOff, lda, 1, c1, ldc)
+		gemm(false, true, m, d2, d1, alpha, b1, ldb, aOff, lda, 1, c2, ldc)
+	}
+}
+
 // symAt reads symmetric A(i,j) from the stored triangle.
 func symAt(a []float64, lda, i, j int, upper bool) float64 {
 	if (i <= j) == upper || i == j {
@@ -470,6 +530,70 @@ func dsymmRef(left, upper bool, m, n int, alpha float64, a []float64, lda int, b
 }
 
 // --- Dtrmm: B = alpha*op(A)*B or alpha*B*op(A), triangular A, in place ---
+
+// dtrmmRec recursively splits the triangular matrix into [A11 A12; A21 A22]
+// (one off-diagonal block is zero). op(A) is block-upper-triangular when
+// upper != transA: then B1 picks up a contribution from B2 (left) / B2 from B1
+// (right). The off-diagonal contribution is a gemm against the not-yet-
+// overwritten half of B, sequenced so the in-place update reads originals
+// before they are replaced. Diagonal blocks recurse to dtrmmRef.
+func dtrmmRec(gemm dgemmFunc, left, upper, transA, unit bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int) {
+	if m == 0 || n == 0 {
+		return
+	}
+	d := m // the triangular dimension
+	if !left {
+		d = n
+	}
+	if d <= triBase {
+		dtrmmRef(left, upper, transA, unit, m, n, alpha, a, lda, b, ldb)
+		return
+	}
+	d1 := d / 2
+	d2 := d - d1
+
+	a11 := a
+	a22 := a[d1+d1*lda:]
+	// Stored off-diagonal block: A12 (d1 x d2) at a[d1*lda:] for upper, or
+	// A21 (d2 x d1) at a[d1:] for lower. The gemm's transpose flag on this
+	// operand equals transA (NoTrans uses the block as stored; Trans uses the
+	// other triangle's block transposed).
+	aOff := a[d1:]
+	if upper {
+		aOff = a[d1*lda:]
+	}
+	opUpper := upper != transA // op(A) block-upper-triangular?
+
+	if left {
+		b1, b2 := b, b[d1:]
+		if opUpper {
+			// B1 = alpha*op(A11)*B1 + alpha*op(A12)*B2; B2 = alpha*op(A22)*B2.
+			dtrmmRec(gemm, left, upper, transA, unit, d1, n, alpha, a11, lda, b1, ldb)
+			gemm(transA, false, d1, n, d2, alpha, aOff, lda, b2, ldb, 1, b1, ldb)
+			dtrmmRec(gemm, left, upper, transA, unit, d2, n, alpha, a22, lda, b2, ldb)
+		} else {
+			// B2 = alpha*op(A22)*B2 + alpha*op(A21)*B1; B1 = alpha*op(A11)*B1.
+			dtrmmRec(gemm, left, upper, transA, unit, d2, n, alpha, a22, lda, b2, ldb)
+			gemm(transA, false, d2, n, d1, alpha, aOff, lda, b1, ldb, 1, b2, ldb)
+			dtrmmRec(gemm, left, upper, transA, unit, d1, n, alpha, a11, lda, b1, ldb)
+		}
+		return
+	}
+
+	// Right: B = alpha*B*op(A); split B by columns.
+	b1, b2 := b, b[d1*ldb:]
+	if opUpper {
+		// B2 = alpha*B2*op(A22) + alpha*B1*op(A12); B1 = alpha*B1*op(A11).
+		dtrmmRec(gemm, left, upper, transA, unit, m, d2, alpha, a22, lda, b2, ldb)
+		gemm(false, transA, m, d2, d1, alpha, b1, ldb, aOff, lda, 1, b2, ldb)
+		dtrmmRec(gemm, left, upper, transA, unit, m, d1, alpha, a11, lda, b1, ldb)
+	} else {
+		// B1 = alpha*B1*op(A11) + alpha*B2*op(A21); B2 = alpha*B2*op(A22).
+		dtrmmRec(gemm, left, upper, transA, unit, m, d1, alpha, a11, lda, b1, ldb)
+		gemm(false, transA, m, d1, d2, alpha, b2, ldb, aOff, lda, 1, b1, ldb)
+		dtrmmRec(gemm, left, upper, transA, unit, m, d2, alpha, a22, lda, b2, ldb)
+	}
+}
 
 func dtrmmRef(left, upper, transA, unit bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int) {
 	if left && !transA {

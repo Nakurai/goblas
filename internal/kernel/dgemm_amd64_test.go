@@ -26,10 +26,10 @@ func TestDgemmAVX2MatchesGeneric(t *testing.T) {
 
 	dims := []struct{ m, n, k int }{
 		{1, 1, 1},
-		{8, 4, 16},   // exactly one full tile
-		{7, 3, 5},    // single partial tile
-		{16, 8, 32},  // multiple full tiles
-		{17, 9, 33},  // full tiles + edges on every dimension
+		{8, 4, 16},  // exactly one full tile
+		{7, 3, 5},   // single partial tile
+		{16, 8, 32}, // multiple full tiles
+		{17, 9, 33}, // full tiles + edges on every dimension
 		{64, 64, 64},
 		{100, 50, 300}, // k > kc: multiple pc blocks
 		{530, 30, 40},  // m > mc: multiple ic blocks

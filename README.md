@@ -13,9 +13,10 @@ A pure-Go BLAS (Basic Linear Algebra Subprograms) library for float64, with hand
 | **L1** | `Ddot` | ✅ | ✅ ~17.6 GFLOPS |
 | **L1** | `Daxpy` | ✅ | ✅ ~15 GFLOPS |
 | **L1** | `Dscal` | ✅ | ✅ |
-| **L1** | `Dnrm2`, `Dasum`, `Idamax`, `Dcopy`, `Dswap` | ✅ | (fallback to pure-Go) |
+| **L1** | `Dnrm2`, `Dasum` | ✅ | ✅ ~8× / ~5× (NEON reduction) |
+| **L1** | `Idamax`, `Dcopy`, `Dswap` | ✅ | (fallback to pure-Go) |
 | **L2** | `Dgemv` | ✅ | ✅ ~17 GFLOPS |
-| **L2** | `Dger`, `Dtrsv` | ✅ | (fallback to pure-Go) |
+| **L2** | `Dger`, `Dtrsv` | ✅ | ✅ ~2× (reuse NEON `daxpy`/`ddot`) |
 | **L3** | `Dgemm` | ✅ | ✅ ~390 GFLOPS (tiled, multithreaded, tuned) |
 | **L3** | `Dsyrk`, `Dtrsm` | ✅ | ✅ recursive blocking — bulk runs on the NEON `Dgemm` |
 | **L3** | `Dsymm`, `Dtrmm` | ✅ | ✅ recursive blocking — bulk runs on the NEON `Dgemm` |
@@ -300,13 +301,17 @@ goblas/
       kernel.go                // Kernel interface (all routines)
       generic.go               // genericKernel: pure-Go, always correct, universal fallback
       generic_l1.go/_l2.go/_l3.go  // pure-Go implementations by level
-      l3_tri.go                // recursive Dsyrk/Dtrsm + reference Dsymm/Dtrmm
+      l3_tri.go                // recursive Dsyrk/Dtrsm/Dsymm/Dtrmm (bulk on Dgemm)
       dgemm_driver.go          // shared tiled/parallel blocking driver (all kernels)
       arm64.go                 // neonKernel embeds genericKernel + Select() for ARM64
       ddot_arm64.s/.go         // NEON ddot + go:noescape stub
       daxpy_arm64.s/.go        // NEON daxpy + stub
       dscal_arm64.s/.go        // NEON dscal + stub
+      dasum_arm64.s/.go        // NEON dasum (abs via sign-mask, FMLA-ones sum)
+      dnrm2_arm64.s/.go        // NEON sum-of-squares + guarded fallback
       dgemv_arm64.s/.go        // NEON dgemv + stub
+      dger_arm64.go            // NEON dger (reuses the daxpy kernel per column)
+      dtrsv_arm64.go           // NEON dtrsv (reuses the daxpy/ddot kernels)
       dgemm_arm64.s/.go        // NEON 8x4 micro-kernel + kernel selection vars
       dgemm8x6_arm64.s         // NEON 8x6 micro-kernel (default on ARM64)
       avx2_amd64.go            // avx2Kernel + Select() for x86-64 (experimental)
@@ -325,10 +330,11 @@ On darwin/arm64 the library reads `sysctl` at startup to identify the M-series c
 
 Go's ARM64 assembler has narrower NEON float support than raw ARM64 assembly. Key findings from implementation:
 
-- ✅ Available: `VLD1.P`, `VST1.P`, `VFMLA` (fused multiply-add), `VDUP` (lane broadcast), `VEOR` (zero), scalar `FADDD`/`FMULD`/`FMOVD`
+- ✅ Available: `VLD1.P`, `VST1.P`, `VFMLA` (fused multiply-add), `VDUP` (lane broadcast, including `VDUP Rn, Vd.D2` from a general register), `VAND`/`VEOR` (bitwise — e.g. sign-bit clear for `abs`), scalar `FADDD`/`FMULD`/`FMOVD`/`FABSD`
 - ❌ **`VADD .D2` is integer add**, not floating-point — silently produces garbage on float data
 - ❌ `VFADD`, `VFMUL`, `FADDP` are unrecognized by the assembler
-- The horizontal sum pattern is: `VDUP V0.D[1], V1.D2` then `FADDD F1, F0, F0` (not stack spill)
+- ❌ `VFMAX` and `VCMHI` (vector FP max / vector compare) are also unrecognized — there is no clean way to vectorize an argmax (`Idamax`), so it stays pure-Go
+- Idioms: accumulate a sum with `VFMLA` against a `[1.0, 1.0]` ones vector (no vector FP add); horizontal-reduce with `VDUP V0.D[1], V1.D2` then `FADDD F1, F0, F0` (not stack spill); compute `abs` with `VAND` against a `0x7FFF…` mask
 
 ## Next steps (roadmap)
 

@@ -33,6 +33,14 @@ func (ak avx2Kernel) Dtrsm(left, upper, transA, unit bool, m, n int, alpha float
 	dtrsmRec(ak.Dgemm, left, upper, transA, unit, m, n, alpha, a, lda, b, ldb)
 }
 
+func (ak avx2Kernel) Dsymm(left, upper bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int) {
+	dsymmRec(ak.Dgemm, left, upper, m, n, alpha, a, lda, b, ldb, beta, c, ldc)
+}
+
+func (ak avx2Kernel) Dtrmm(left, upper, transA, unit bool, m, n int, alpha float64, a []float64, lda int, b []float64, ldb int) {
+	dtrmmRec(ak.Dgemm, left, upper, transA, unit, m, n, alpha, a, lda, b, ldb)
+}
+
 // Select routes AVX2+FMA-capable x86-64 hosts to the AVX2 kernel; anything
 // older (pre-2013) gets the portable reference. Blocking is conservative for
 // the typical 32 KB x86 L1d: a packed A block is mc*kc*8 = 16*256*8 = 32 KB.

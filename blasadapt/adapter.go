@@ -91,6 +91,19 @@ func (Implementation) Dgemv(tA blas.Transpose, m, n int, alpha float64, a []floa
 	goblas.Dgemv(!trans(tA), n, m, alpha, a, lda, x, incX, beta, y, incY)
 }
 
+// Dger: row-major A += α x yᵀ ≡ column-major Aᵀ += α y xᵀ, so swap the
+// dimensions and the two vectors (the buffer read column-major is Aᵀ).
+func (Implementation) Dger(m, n int, alpha float64, x []float64, incX int, y []float64, incY int, a []float64, lda int) {
+	goblas.Dger(n, m, alpha, y, incY, x, incX, a, lda)
+}
+
+// Dtrsv: the column-major buffer is Aᵀ, so the triangle flips and op flips
+// (NoTrans on A becomes Trans on Aᵀ and vice versa); the single RHS vector x
+// has no layout.
+func (Implementation) Dtrsv(ul blas.Uplo, tA blas.Transpose, d blas.Diag, n int, a []float64, lda int, x []float64, incX int) {
+	goblas.Dtrsv(flipUplo(ul), !trans(tA), diag(d), n, a, lda, x, incX)
+}
+
 // Dgemm: row-major C = op(A)·op(B) ≡ column-major Cᵀ = op(B)ᵀ·op(A)ᵀ, which
 // on the raw buffers means swapping the operands and m/n.
 func (Implementation) Dgemm(tA, tB blas.Transpose, m, n, k int, alpha float64, a []float64, lda int, b []float64, ldb int, beta float64, c []float64, ldc int) {

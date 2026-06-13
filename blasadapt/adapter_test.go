@@ -90,6 +90,53 @@ func TestDgemvMatchesGonum(t *testing.T) {
 	}
 }
 
+func TestDgerMatchesGonum(t *testing.T) {
+	r := rand.New(rand.NewSource(35))
+	for _, d := range []struct{ m, n int }{{1, 1}, {7, 5}, {33, 17}} {
+		lda := d.n + 1 // row-major: lda >= cols
+		x := randSlice(r, d.m)
+		y := randSlice(r, d.n)
+		aw := randSlice(r, d.m*lda)
+		ag := make([]float64, len(aw))
+		copy(ag, aw)
+
+		stock.Dger(d.m, d.n, 1.3, x, 1, y, 1, aw, lda)
+		ours.Dger(d.m, d.n, 1.3, x, 1, y, 1, ag, lda)
+		almostEqual(t, "dger", ag, aw, 1e-10)
+	}
+}
+
+func TestDtrsvMatchesGonum(t *testing.T) {
+	r := rand.New(rand.NewSource(36))
+	for _, n := range []int{1, 5, 17, 40} {
+		for _, ul := range uplos {
+			for _, tA := range transposes {
+				for _, dg := range diags {
+					lda := n + 1
+					// Well-conditioned triangular A (row-major) in the ul triangle.
+					a := make([]float64, n*lda)
+					scale := 0.4 / math.Sqrt(float64(n))
+					for i := 0; i < n; i++ {
+						for j := 0; j < n; j++ {
+							if (j > i) == (ul == blas.Upper) || i == j {
+								a[i*lda+j] = scale * r.NormFloat64()
+							}
+						}
+						a[i*lda+i] = 3 + math.Abs(r.NormFloat64())
+					}
+					xw := randSlice(r, n)
+					xg := make([]float64, len(xw))
+					copy(xg, xw)
+
+					stock.Dtrsv(ul, tA, dg, n, a, lda, xw, 1)
+					ours.Dtrsv(ul, tA, dg, n, a, lda, xg, 1)
+					almostEqual(t, "dtrsv", xg, xw, 1e-9)
+				}
+			}
+		}
+	}
+}
+
 func TestDsyrkMatchesGonum(t *testing.T) {
 	r := rand.New(rand.NewSource(32))
 	for _, d := range []struct{ n, k int }{{1, 1}, {7, 5}, {33, 17}, {64, 40}} {
