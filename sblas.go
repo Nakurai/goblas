@@ -26,8 +26,13 @@ func Saxpy(n int, alpha float32, x []float32, incX int, y []float32, incY int) {
 	active32.Saxpy(n, alpha, x, incX, y, incY)
 }
 
-// Sscal computes x = alpha*x.
+// Sscal computes x = alpha*x. A negative incX is a no-op: for single-vector
+// routines the reference BLAS treats incX <= 0 as out of domain (a reversed
+// traversal is only meaningful for the paired two-vector routines).
 func Sscal(n int, alpha float32, x []float32, incX int) {
+	if incX < 0 {
+		return
+	}
 	checkVector32("x", n, x, incX)
 	if n == 0 {
 		return
@@ -36,7 +41,11 @@ func Sscal(n int, alpha float32, x []float32, incX int) {
 }
 
 // Snrm2 returns the Euclidean norm sqrt(x·x), computed to avoid overflow.
+// A negative incX returns 0 (see Sscal on the single-vector incX contract).
 func Snrm2(n int, x []float32, incX int) float32 {
+	if incX < 0 {
+		return 0
+	}
 	checkVector32("x", n, x, incX)
 	if n == 0 {
 		return 0
@@ -45,7 +54,11 @@ func Snrm2(n int, x []float32, incX int) float32 {
 }
 
 // Sasum returns the sum of the absolute values of x.
+// A negative incX returns 0 (see Sscal on the single-vector incX contract).
 func Sasum(n int, x []float32, incX int) float32 {
+	if incX < 0 {
+		return 0
+	}
 	checkVector32("x", n, x, incX)
 	if n == 0 {
 		return 0
@@ -54,8 +67,12 @@ func Sasum(n int, x []float32, incX int) float32 {
 }
 
 // Isamax returns the index (in vector terms, 0-based) of the element of x with
-// the largest absolute value, or -1 if n == 0.
+// the largest absolute value, or -1 if n == 0 or incX < 0 (see Sscal on the
+// single-vector incX contract).
 func Isamax(n int, x []float32, incX int) int {
+	if incX < 0 {
+		return -1
+	}
 	checkVector32("x", n, x, incX)
 	if n == 0 {
 		return -1

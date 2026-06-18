@@ -54,8 +54,13 @@ func Daxpy(n int, alpha float64, x []float64, incX int, y []float64, incY int) {
 	active.Daxpy(n, alpha, x, incX, y, incY)
 }
 
-// Dscal computes x = alpha*x.
+// Dscal computes x = alpha*x. A negative incX is a no-op: for single-vector
+// routines the reference BLAS treats incX <= 0 as out of domain (a reversed
+// traversal is only meaningful for the paired two-vector routines).
 func Dscal(n int, alpha float64, x []float64, incX int) {
+	if incX < 0 {
+		return
+	}
 	checkVector("x", n, x, incX)
 	if n == 0 {
 		return
@@ -64,7 +69,11 @@ func Dscal(n int, alpha float64, x []float64, incX int) {
 }
 
 // Dnrm2 returns the Euclidean norm sqrt(x·x), computed to avoid overflow.
+// A negative incX returns 0 (see Dscal on the single-vector incX contract).
 func Dnrm2(n int, x []float64, incX int) float64 {
+	if incX < 0 {
+		return 0
+	}
 	checkVector("x", n, x, incX)
 	if n == 0 {
 		return 0
@@ -73,7 +82,11 @@ func Dnrm2(n int, x []float64, incX int) float64 {
 }
 
 // Dasum returns the sum of the absolute values of x.
+// A negative incX returns 0 (see Dscal on the single-vector incX contract).
 func Dasum(n int, x []float64, incX int) float64 {
+	if incX < 0 {
+		return 0
+	}
 	checkVector("x", n, x, incX)
 	if n == 0 {
 		return 0
@@ -82,8 +95,12 @@ func Dasum(n int, x []float64, incX int) float64 {
 }
 
 // Idamax returns the index (in vector terms, 0-based) of the element of x with
-// the largest absolute value, or -1 if n == 0.
+// the largest absolute value, or -1 if n == 0 or incX < 0 (see Dscal on the
+// single-vector incX contract).
 func Idamax(n int, x []float64, incX int) int {
+	if incX < 0 {
+		return -1
+	}
 	checkVector("x", n, x, incX)
 	if n == 0 {
 		return -1

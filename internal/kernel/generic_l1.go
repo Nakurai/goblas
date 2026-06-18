@@ -74,6 +74,11 @@ func dnrm2Generic[T float](n int, x []T, incX int) T {
 			if scale < a {
 				ssq = 1 + ssq*(scale/a)*(scale/a)
 				scale = a
+			} else if a == scale {
+				// Equal magnitudes contribute exactly 1; written out (rather
+				// than (a/scale)^2) so an Inf vector yields Inf*sqrt(count)
+				// instead of Inf/Inf = NaN.
+				ssq += 1
 			} else {
 				ssq += (a / scale) * (a / scale)
 			}

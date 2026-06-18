@@ -3,3 +3,4 @@ CLAUDE.md
 docs/plan.md
 docs/investigation.md
 *.test
+goblast-verify/corpus/
